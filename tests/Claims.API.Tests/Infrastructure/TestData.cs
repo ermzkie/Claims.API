@@ -1,8 +1,8 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Claims.API.Auth;
 using Claims.API.Models;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
 namespace Claims.API.Tests.Infrastructure;
@@ -46,20 +46,28 @@ public static class TestData
         bool mustChangePassword = false)
     {
         await using var db = app.CreateDbContext();
+
+        var roles = await db.Roles
+            .Where(r => r.RoleName != null && roleNames.Contains(r.RoleName))
+            .Select(r => new { r.RoleId, r.RoleName })
+            .ToListAsync();
+        var missing = roleNames.Except(roles.Select(r => r.RoleName!)).ToList();
+        if (missing.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Role(s) not seeded in the test database: {string.Join(", ", missing)}.");
+        }
+
         var user = new User
         {
             Username = username,
             MustChangePassword = mustChangePassword,
         };
-        user.PasswordHash = new PasswordHasher<User>().HashPassword(user, password);
+        user.PasswordHash = PasswordHashing.Hasher.HashPassword(user, password);
 
-        var roleIds = await db.Roles
-            .Where(r => r.RoleName != null && roleNames.Contains(r.RoleName))
-            .Select(r => r.RoleId)
-            .ToListAsync();
-        foreach (var roleId in roleIds)
+        foreach (var role in roles)
         {
-            user.UserRoles.Add(new UserRole { RoleId = roleId });
+            user.UserRoles.Add(new UserRole { RoleId = role.RoleId });
         }
 
         db.Users.Add(user);

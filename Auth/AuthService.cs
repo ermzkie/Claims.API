@@ -16,6 +16,16 @@ public enum LoginOutcome
 
 public record LoginResult(LoginOutcome Outcome, LoginResponseDto? Response);
 
+public enum ChangePasswordOutcome
+{
+    Success,
+    LockedOut,
+    WrongCurrentPassword,
+    PolicyViolation,
+}
+
+public record ChangePasswordResult(ChangePasswordOutcome Outcome, string? Message);
+
 public class AuthService
 {
     public const int MaxFailedAttempts = 5;
@@ -63,12 +73,7 @@ public class AuthService
         var verify = PasswordHashing.Hasher.VerifyHashedPassword(user, user.PasswordHash, password);
         if (verify == PasswordVerificationResult.Failed)
         {
-            user.FailedLoginCount++;
-            if (user.FailedLoginCount >= MaxFailedAttempts)
-            {
-                user.LockoutEnd = now + LockoutDuration;
-                user.FailedLoginCount = 0;
-            }
+            RecordFailedAttempt(user, now);
             await _db.SaveChangesAsync();
             return new LoginResult(LoginOutcome.InvalidCredentials, null);
         }
@@ -98,6 +103,58 @@ public class AuthService
             MustChangePassword = current.MustChangePassword,
             User = current,
         });
+    }
+
+    public async Task<ChangePasswordResult> ChangePasswordAsync(int userId, string? currentPassword, string? newPassword)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.UserId == userId);
+        if (user is null)
+        {
+            return new ChangePasswordResult(ChangePasswordOutcome.WrongCurrentPassword, null);
+        }
+
+        var now = _time.GetLocalNow().DateTime;
+
+        if (user.LockoutEnd > now)
+        {
+            return new ChangePasswordResult(ChangePasswordOutcome.LockedOut, null);
+        }
+
+        var verified = !string.IsNullOrEmpty(currentPassword)
+            && PasswordHashing.Hasher.VerifyHashedPassword(user, user.PasswordHash, currentPassword)
+                != PasswordVerificationResult.Failed;
+        if (!verified)
+        {
+            RecordFailedAttempt(user, now);
+            await _db.SaveChangesAsync();
+            return new ChangePasswordResult(ChangePasswordOutcome.WrongCurrentPassword, null);
+        }
+
+        var violation = PasswordPolicy.Validate(newPassword, user.Username, currentPassword);
+        if (violation is not null)
+        {
+            return new ChangePasswordResult(ChangePasswordOutcome.PolicyViolation, violation);
+        }
+
+        user.PasswordHash = PasswordHashing.Hasher.HashPassword(user, newPassword!);
+        user.MustChangePassword = false;
+        user.FailedLoginCount = 0;
+        user.LockoutEnd = null;
+        user.LastUpdatedBy = userId;
+        user.DateLastUpdated = now;
+        await _db.SaveChangesAsync();
+
+        return new ChangePasswordResult(ChangePasswordOutcome.Success, null);
+    }
+
+    private static void RecordFailedAttempt(User user, DateTime now)
+    {
+        user.FailedLoginCount++;
+        if (user.FailedLoginCount >= MaxFailedAttempts)
+        {
+            user.LockoutEnd = now + LockoutDuration;
+            user.FailedLoginCount = 0;
+        }
     }
 
     public async Task<CurrentUserDto?> GetCurrentUserAsync(int userId)

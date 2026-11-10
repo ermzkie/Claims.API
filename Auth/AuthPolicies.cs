@@ -61,16 +61,23 @@ public static class AuthPolicies
                 bearer.Events.OnTokenValidated = CurrentUserValidator.ValidateAsync;
             });
 
+        // One shared base: authenticated and not pending a password change. Everything except
+        // AllowPendingPasswordChange derives from it, so the gate cannot be missed.
+        var basePolicy = new AuthorizationPolicyBuilder()
+            .RequireAuthenticatedUser()
+            .AddRequirements(new PasswordChangeRequirement())
+            .Build();
+
+        services.AddSingleton<IAuthorizationHandler, PasswordChangeHandler>();
+        services.AddSingleton<IAuthorizationMiddlewareResultHandler, AuthorizationResultHandler>();
+
         services.AddAuthorizationBuilder()
-            .SetDefaultPolicy(new AuthorizationPolicyBuilder()
-                .RequireAuthenticatedUser()
+            .SetDefaultPolicy(new AuthorizationPolicyBuilder().Combine(basePolicy).Build())
+            .SetFallbackPolicy(new AuthorizationPolicyBuilder().Combine(basePolicy).Build())
+            .AddPolicy(UserAdmin, new AuthorizationPolicyBuilder()
+                .Combine(basePolicy)
+                .RequireRole(RoleNames.SuperAdministrator, RoleNames.Administrator)
                 .Build())
-            .SetFallbackPolicy(new AuthorizationPolicyBuilder()
-                .RequireAuthenticatedUser()
-                .Build())
-            .AddPolicy(UserAdmin, policy => policy
-                .RequireAuthenticatedUser()
-                .RequireRole(RoleNames.SuperAdministrator, RoleNames.Administrator))
             .AddPolicy(AllowPendingPasswordChange, policy => policy
                 .RequireAuthenticatedUser());
 

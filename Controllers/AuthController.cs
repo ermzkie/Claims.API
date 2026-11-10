@@ -30,4 +30,27 @@ public class AuthController : ControllerBase
             _ => Unauthorized(new { message = "Invalid username or password." }),
         };
     }
+
+    [HttpGet("me")]
+    [Authorize(Policy = AuthPolicies.AllowPendingPasswordChange)]
+    public async Task<ActionResult<CurrentUserDto>> Me()
+    {
+        var current = await _auth.GetCurrentUserAsync(User.GetUserId());
+        return current is null ? Unauthorized() : Ok(current);
+    }
+
+    [HttpPost("change-password")]
+    [Authorize(Policy = AuthPolicies.AllowPendingPasswordChange)]
+    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequestDto request)
+    {
+        var result = await _auth.ChangePasswordAsync(User.GetUserId(), request.CurrentPassword, request.NewPassword);
+
+        return result.Outcome switch
+        {
+            ChangePasswordOutcome.Success => NoContent(),
+            ChangePasswordOutcome.LockedOut => BadRequest(new { message = "Too many failed attempts. Try again later.", code = "locked_out" }),
+            ChangePasswordOutcome.WrongCurrentPassword => BadRequest(new { message = "Current password is incorrect." }),
+            _ => BadRequest(new { message = result.Message }),
+        };
+    }
 }

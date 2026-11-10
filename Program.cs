@@ -14,6 +14,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 );
 
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddScoped<Claims.API.Services.UserAdminService>();
 builder.Services.AddClaimsAuthentication(builder.Configuration);
 
 // Register controllers

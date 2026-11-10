@@ -1,0 +1,32 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+# Local directories
+/publish
+/bin
+/obj
+
+# Local files
+.env
+.env.*
+.dll
+.exe
+.pdb
+bin/Debug/net10.0/Claims.API.dll
+bin/Debug/net10.0/Claims.API.exe
+obj/Debug/net10.0/Claims.API.dll
+obj/Debug/net10.0/rjsmcshtml.dswa.cache.json
+obj/Debug/net10.0/rjsmrazor.dswa.cache.json
+obj/Debug/net10.0/ref/Claims.API.dll
+obj/Debug/net10.0/refint/Claims.API.dll
+obj/Debug/net10.0/apphost.exe
+obj/Debug/net10.0/Claims.API.AssemblyInfo.cs
+obj/Debug/net10.0/Claims.API.AssemblyInfoInputs.cache
+obj/Debug/net10.0/Claims.API.csproj.FileListAbsolute.txt
+obj/Debug/net10.0/Claims.API.dll
+obj/Debug/net10.0/Claims.API.pdb
+obj/Debug/net10.0/ref/Claims.API.dll
+obj/Debug/net10.0/refint/Claims.API.dll
+obj/Debug/net10.0/rjsmcshtml.dswa.cache.json
+obj/Debug/net10.0/rjsmrazor.dswa.cache.json

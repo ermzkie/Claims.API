@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Claims.API.Data;
+using Claims.API.Auth;
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -11,6 +12,9 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
         builder.Configuration.GetConnectionString("DefaultConnection")
     )
 );
+
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddClaimsAuthentication(builder.Configuration);
 
 // Register controllers
 builder.Services.AddControllers();
@@ -28,6 +32,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();

@@ -62,23 +62,17 @@ public static class TestData
         {
             Username = username,
             MustChangePassword = mustChangePassword,
+            Status = active,
         };
         user.PasswordHash = PasswordHashing.Hasher.HashPassword(user, password);
 
         foreach (var role in roles)
         {
-            user.UserRoles.Add(new UserRole { RoleId = role.RoleId });
+            user.UserRoles.Add(new UserRole { RoleId = role.RoleId, Status = true });
         }
 
         db.Users.Add(user);
         await db.SaveChangesAsync();
-
-        if (!active)
-        {
-            // EF treats false as "unset" for a property with HasDefaultValue(true), so flip it after the insert.
-            user.Status = false;
-            await db.SaveChangesAsync();
-        }
 
         return user.UserId;
     }

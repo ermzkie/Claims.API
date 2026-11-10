@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
@@ -7,6 +8,9 @@ namespace Claims.API.Auth;
 
 public static class AuthPolicies
 {
+    public const string UserAdmin = "UserAdmin";
+    public const string AllowPendingPasswordChange = "AllowPendingPasswordChange";
+
     public static IServiceCollection AddClaimsAuthentication(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddOptions<JwtOptions>()
@@ -39,6 +43,36 @@ public static class AuthPolicies
                     ClockSkew = TimeSpan.FromMinutes(1),
                 };
             });
+
+        services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+            .Configure<TimeProvider>((bearer, time) =>
+            {
+                bearer.TimeProvider = time;
+                // The handler's own lifetime check ignores JwtBearerOptions.TimeProvider, so compare against it explicitly.
+                var skew = bearer.TokenValidationParameters.ClockSkew;
+                bearer.TokenValidationParameters.LifetimeValidator = (notBefore, expires, _, _) =>
+                {
+                    var now = time.GetUtcNow().UtcDateTime;
+                    return expires is not null && notBefore is not null
+                        ? notBefore.Value <= now + skew && expires.Value > now - skew
+                        : false;
+                };
+                bearer.Events ??= new JwtBearerEvents();
+                bearer.Events.OnTokenValidated = CurrentUserValidator.ValidateAsync;
+            });
+
+        services.AddAuthorizationBuilder()
+            .SetDefaultPolicy(new AuthorizationPolicyBuilder()
+                .RequireAuthenticatedUser()
+                .Build())
+            .SetFallbackPolicy(new AuthorizationPolicyBuilder()
+                .RequireAuthenticatedUser()
+                .Build())
+            .AddPolicy(UserAdmin, policy => policy
+                .RequireAuthenticatedUser()
+                .RequireRole(RoleNames.SuperAdministrator, RoleNames.Administrator))
+            .AddPolicy(AllowPendingPasswordChange, policy => policy
+                .RequireAuthenticatedUser());
 
         return services;
     }

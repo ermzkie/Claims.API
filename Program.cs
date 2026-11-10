@@ -27,7 +27,7 @@ var app = builder.Build();
 // Configure HTTP request pipeline
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+    app.MapOpenApi().AllowAnonymous();
 }
 
 app.UseHttpsRedirection();
@@ -45,8 +45,7 @@ app.MapGet("/api/health/database", async (ApplicationDbContext db) =>
     {
         return Results.Ok(new
         {
-            Status = "Connected",
-            Database = "sysCLAIMS"
+            Status = "Connected"
         });
     }
 

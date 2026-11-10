@@ -8,18 +8,18 @@ namespace Claims.API.Tests.Infrastructure;
 /// The production model uses SQL Server defaults such as (getdate()); SQLite needs CURRENT_TIMESTAMP instead.
 /// </summary>
 public class SqliteModelCustomizer(ModelCustomizerDependencies dependencies)
-    : RelationalModelCustomizer(dependencies)
+  : RelationalModelCustomizer(dependencies)
 {
-    public override void Customize(ModelBuilder modelBuilder, DbContext context)
-    {
-        base.Customize(modelBuilder, context);
+  public override void Customize(ModelBuilder modelBuilder, DbContext context)
+  {
+    base.Customize(modelBuilder, context);
 
-        foreach (var property in modelBuilder.Model.GetEntityTypes().SelectMany(e => e.GetProperties()))
-        {
-            if (property.GetDefaultValueSql() == "(getdate())")
-            {
-                property.SetDefaultValueSql("CURRENT_TIMESTAMP");
-            }
-        }
+    foreach (var property in modelBuilder.Model.GetEntityTypes().SelectMany(e => e.GetProperties()))
+    {
+      if (property.GetDefaultValueSql() == "(getdate())")
+      {
+        property.SetDefaultValueSql("CURRENT_TIMESTAMP");
+      }
     }
+  }
 }

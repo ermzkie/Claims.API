@@ -1,6 +1,102 @@
-@Claims.API_HostAddress = http://localhost:5224
+# Manual API tests (VS Code REST Client extension).
+# Define `username` and `password` in your own REST Client environment settings
+# (.vscode/settings.json -> "rest-client.environmentVariables"). Never put them in this file.
+# Run the "login" request first; the token is captured for the requests below.
 
-GET {{Claims.API_HostAddress}}/weatherforecast/
-Accept: application/json
+@baseUrl = http://localhost:5224
+
+### Login
+# @name login
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "{{username}}",
+  "password": "{{password}}"
+}
 
 ###
+@token = {{login.response.body.token}}
+
+### Current user
+GET {{baseUrl}}/api/auth/me
+Authorization: Bearer {{token}}
+
+### Change password (required when mustChangePassword is true)
+POST {{baseUrl}}/api/auth/change-password
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "currentPassword": "{{password}}",
+  "newPassword": "REPLACE-WITH-NEW-PASSWORD"
+}
+
+### List users
+GET {{baseUrl}}/api/users
+Authorization: Bearer {{token}}
+
+### Get user
+GET {{baseUrl}}/api/users/1
+Authorization: Bearer {{token}}
+
+### Create user (roleIds: 1 Super Administrator, 2 Administrator, 3 Frontliner, 4 Social Worker)
+POST {{baseUrl}}/api/users
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "username": "jdelacruz",
+  "firstname": "Juan",
+  "middlename": "Santos",
+  "lastname": "Dela Cruz",
+  "nameSuffixId": null,
+  "temporaryPassword": "REPLACE-WITH-TEMP-PASSWORD",
+  "roleIds": [3]
+}
+
+### Update user names
+PUT {{baseUrl}}/api/users/2
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "firstname": "Juan",
+  "middlename": "Santos",
+  "lastname": "Dela Cruz",
+  "nameSuffixId": null
+}
+
+### Set user roles
+PUT {{baseUrl}}/api/users/2/roles
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "roleIds": [3, 4]
+}
+
+### Reset password
+POST {{baseUrl}}/api/users/2/reset-password
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "temporaryPassword": "REPLACE-WITH-TEMP-PASSWORD"
+}
+
+### Deactivate user
+POST {{baseUrl}}/api/users/2/deactivate
+Authorization: Bearer {{token}}
+
+### Activate user
+POST {{baseUrl}}/api/users/2/activate
+Authorization: Bearer {{token}}
+
+### Nature of service (any signed-in user)
+GET {{baseUrl}}/api/NatureOfService
+Authorization: Bearer {{token}}
+
+### Database health
+GET {{baseUrl}}/api/health/database
+Authorization: Bearer {{token}}

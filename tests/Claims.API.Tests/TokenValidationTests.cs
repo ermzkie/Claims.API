@@ -31,7 +31,8 @@ public class TokenValidationTests
                 new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)),
                 SecurityAlgorithms.HmacSha256),
         };
-        return new JsonWebTokenHandler().CreateToken(descriptor);
+        // Defaults off: otherwise a missing exp/iat is silently filled from the real wall clock.
+        return new JsonWebTokenHandler { SetDefaultTimesOnTokenCreation = false }.CreateToken(descriptor);
     }
 
     private static async Task<HttpStatusCode> ProbeAsync(ClaimsApiFactory app, string token)
@@ -67,6 +68,7 @@ public class TokenValidationTests
         var now = app.Clock.GetUtcNow().UtcDateTime;
 
         var token = Sign(id, now, null);
+        Assert.False(new JsonWebTokenHandler().ReadJsonWebToken(token).TryGetPayloadValue<long>("exp", out _));
 
         Assert.Equal(HttpStatusCode.Unauthorized, await ProbeAsync(app, token));
     }

@@ -30,3 +30,7 @@ obj/Debug/net10.0/ref/Claims.API.dll
 obj/Debug/net10.0/refint/Claims.API.dll
 obj/Debug/net10.0/rjsmcshtml.dswa.cache.json
 obj/Debug/net10.0/rjsmrazor.dswa.cache.json
+
+# Build output in any project folder (API and tests)
+bin/
+obj/

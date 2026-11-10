@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Claims.API.Auth;
 using Microsoft.EntityFrameworkCore;
 using Claims.API.Data;
 using Claims.API.Models;
@@ -55,6 +57,7 @@ public class NatureOfServiceController : ControllerBase
 
   // POST: api/NatureOfService
   [HttpPost]
+  [Authorize(Policy = AuthPolicies.UserAdmin)]
   public async Task<ActionResult<NatureOfServiceResponseDto>> Create(
       CreateNatureOfServiceDto dto)
   {
@@ -90,6 +93,7 @@ public class NatureOfServiceController : ControllerBase
 
   // PUT: api/NatureOfService/1
   [HttpPut("{id}")]
+  [Authorize(Policy = AuthPolicies.UserAdmin)]
   public async Task<IActionResult> Update(
       short id,
       UpdateNatureOfServiceDto dto)
@@ -123,6 +127,7 @@ public class NatureOfServiceController : ControllerBase
 
   // DELETE: api/NatureOfService/1
   [HttpDelete("{id}")]
+  [Authorize(Policy = AuthPolicies.UserAdmin)]
   public async Task<IActionResult> Delete(short id)
   {
     var record = await _context.NatureOfServices

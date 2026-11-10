@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Claims.API.Data;
+using Claims.API.Auth;
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -9,7 +10,7 @@ var secretsPath = @"C:\Users\Erma\AppData\Roaming\Microsoft\UserSecrets\61f54422
 
 builder.Configuration.AddJsonFile(
     secretsPath,
-    optional: false,
+    optional: true,
     reloadOnChange: false
 );
 
@@ -32,6 +33,10 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(connectionString)
 );
 
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddScoped<Claims.API.Services.UserAdminService>();
+builder.Services.AddClaimsAuthentication(builder.Configuration);
+
 // Register controllers
 builder.Services.AddControllers();
 
@@ -49,6 +54,7 @@ if (app.Environment.IsDevelopment())
 // IIS manages the HTTP/HTTPS bindings.
 // app.UseHttpsRedirection();
 
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
@@ -62,8 +68,7 @@ app.MapGet("/api/health/database", async (ApplicationDbContext db) =>
     {
         return Results.Ok(new
         {
-            Status = "Connected",
-            Database = "sysCLAIMS"
+            Status = "Connected"
         });
     }
 
@@ -71,3 +76,4 @@ app.MapGet("/api/health/database", async (ApplicationDbContext db) =>
 });
 
 app.Run();
+public partial class Program;

@@ -35,7 +35,7 @@ public class UsersController : ControllerBase
         var result = await _users.CreateAsync(User.GetUserId(), dto);
         if (result.Outcome == AdminOutcome.Created)
         {
-            return Created($"api/users/{result.User!.UserId}", result.User);
+            return CreatedAtAction(nameof(Get), new { id = result.User!.UserId }, result.User);
         }
         return Map(result);
     }

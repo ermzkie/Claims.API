@@ -15,6 +15,11 @@ public static class PasswordPolicy
             return $"Password must be at least {MinLength} characters.";
         }
 
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            return "Password must not be only spaces.";
+        }
+
         if (password.Length > MaxLength)
         {
             return $"Password must be at most {MaxLength} characters.";

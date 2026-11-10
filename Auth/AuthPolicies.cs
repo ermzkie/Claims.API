@@ -30,6 +30,7 @@ public static class AuthPolicies
             {
                 var o = jwt.Value;
                 bearer.MapInboundClaims = false;
+                bearer.IncludeErrorDetails = false;
                 bearer.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateIssuer = true,

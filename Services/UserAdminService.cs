@@ -1,3 +1,5 @@
+using System.Data;
+using System.Text.RegularExpressions;
 using Claims.API.Auth;
 using Claims.API.Data;
 using Claims.API.DTOs.Users;
@@ -18,17 +20,22 @@ public enum AdminOutcome
 
 public record AdminResult(AdminOutcome Outcome, string? Message = null, UserSummaryDto? User = null);
 
-public class UserAdminService
+public partial class UserAdminService
 {
     private const int MaxNameLength = 50;
 
+    [GeneratedRegex("^[A-Za-z0-9._-]+$")]
+    private static partial Regex UsernamePattern();
+
     private readonly ApplicationDbContext _db;
     private readonly TimeProvider _time;
+    private readonly ILogger<UserAdminService> _logger;
 
-    public UserAdminService(ApplicationDbContext db, TimeProvider time)
+    public UserAdminService(ApplicationDbContext db, TimeProvider time, ILogger<UserAdminService> logger)
     {
         _db = db;
         _time = time;
+        _logger = logger;
     }
 
     public async Task<IReadOnlyList<UserSummaryDto>> ListAsync()
@@ -61,9 +68,9 @@ public class UserAdminService
 
         // 4. Validation
         var username = dto.Username?.Trim() ?? string.Empty;
-        if (username.Length == 0 || username.Length > MaxNameLength || username.Any(char.IsWhiteSpace))
+        if (username.Length == 0 || username.Length > MaxNameLength || !UsernamePattern().IsMatch(username))
         {
-            return Invalid("Username is required, at most 50 characters, with no spaces.");
+            return Invalid("Username must be 1 to 50 characters: letters, digits, '.', '_' or '-' only.");
         }
         var roleError = ValidateRoleIds(roleIds, roles);
         if (roleError is not null)
@@ -118,10 +125,16 @@ public class UserAdminService
         {
             await _db.SaveChangesAsync();
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex)
         {
-            // Lost a race on the unique username index.
-            return Conflict("That username is already taken.");
+            // Provider-neutral: only report "taken" if that username now exists; otherwise it is a real failure.
+            _db.ChangeTracker.Clear();
+            if (await _db.Users.AnyAsync(u => u.Username.ToLower() == normalized))
+            {
+                return Conflict("That username is already taken.");
+            }
+            _logger.LogError(ex, "Failed to create user {Username}.", username);
+            throw;
         }
 
         return new AdminResult(AdminOutcome.Created, null, await GetAsync(user.UserId));
@@ -163,6 +176,7 @@ public class UserAdminService
 
     public async Task<AdminResult> ReplaceRolesAsync(int actorId, int id, ReplaceRolesDto dto)
     {
+        await using var tx = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         // 1. Not found
         var target = await LoadTargetAsync(id);
         if (target is null)
@@ -225,6 +239,7 @@ public class UserAdminService
         }
         Touch(target, actorId, now);
         await _db.SaveChangesAsync();
+        await tx.CommitAsync();
 
         return new AdminResult(AdminOutcome.Ok, null, await GetAsync(id));
     }
@@ -270,6 +285,7 @@ public class UserAdminService
 
     public async Task<AdminResult> SetActiveAsync(int actorId, int id, bool active)
     {
+        await using var tx = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         // 1. Not found
         var target = await LoadTargetAsync(id);
         if (target is null)
@@ -300,6 +316,7 @@ public class UserAdminService
         target.Status = active;
         Touch(target, actorId, Now());
         await _db.SaveChangesAsync();
+        await tx.CommitAsync();
 
         return new AdminResult(AdminOutcome.Ok);
     }

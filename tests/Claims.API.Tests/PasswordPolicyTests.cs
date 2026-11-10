@@ -4,7 +4,7 @@ namespace Claims.API.Tests;
 
 public class PasswordPolicyTests
 {
-    [Theory] [InlineData(null)] [InlineData("")] [InlineData("1234567")]
+    [Theory] [InlineData(null)] [InlineData("")] [InlineData("1234567")] [InlineData("        ")]
     public void TooShortOrMissing_IsRejected(string? pw) => Assert.NotNull(PasswordPolicy.Validate(pw, "maria"));
     [Fact] public void EightChars_IsAccepted() => Assert.Null(PasswordPolicy.Validate("12345678", "maria"));
     [Fact] public void Over128_IsRejected() => Assert.NotNull(PasswordPolicy.Validate(new string('a', 129), "maria"));

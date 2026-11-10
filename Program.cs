@@ -28,7 +28,7 @@ var app = builder.Build();
 // Configure HTTP request pipeline
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi().AllowAnonymous();
+    app.MapOpenApi();
 }
 
 app.UseHttpsRedirection();

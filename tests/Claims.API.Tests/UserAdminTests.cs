@@ -65,8 +65,10 @@ public class UserAdminTests
         var response = await admin.PostAsJsonAsync("/api/users", NewUser("newsw", [4]));
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        Assert.NotNull(response.Headers.Location);
         var body = await ReadJsonAsync(response);
+        var newId = body.GetProperty("userId").GetInt32();
+        Assert.EndsWith($"/api/users/{newId}", response.Headers.Location!.ToString());
+        Assert.DoesNotContain("/api/api/", response.Headers.Location.ToString());
         Assert.True(body.GetProperty("status").GetBoolean());
 
         var fresh = await LoginAsAsync(app, "newsw", Temp);
@@ -90,6 +92,20 @@ public class UserAdminTests
         var response = await admin.PostAsJsonAsync("/api/users", NewUser("SW", [4]));
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("maría", HttpStatusCode.BadRequest)]
+    [InlineData("a b", HttpStatusCode.BadRequest)]
+    [InlineData("j.dela-cruz_2", HttpStatusCode.Created)]
+    public async Task Create_UsernameCharset(string username, HttpStatusCode expected)
+    {
+        await using var app = await SeedAsync();
+        var admin = await LoginAsAsync(app, "admin", Pw);
+
+        var response = await admin.PostAsJsonAsync("/api/users", NewUser(username, [4]));
+
+        Assert.Equal(expected, response.StatusCode);
     }
 
     [Fact]

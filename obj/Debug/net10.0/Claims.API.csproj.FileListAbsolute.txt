@@ -211,3 +211,4 @@ D:\Git\claims\claims.api\obj\Debug\net10.0\refint\Claims.API.dll
 D:\Git\claims\claims.api\obj\Debug\net10.0\Claims.API.pdb
 D:\Git\claims\claims.api\obj\Debug\net10.0\Claims.API.genruntimeconfig.cache
 D:\Git\claims\claims.api\obj\Debug\net10.0\ref\Claims.API.dll
+D:\Git\claims\claims.api\obj\Debug\net10.0\Claims.API.sourcelink.json

@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Claims.API.Models;
 
 [Table("UserRole")]
+[Index(nameof(UserId), nameof(RoleId), IsUnique = true, Name = "UX_UserRole_User_Role")]
 public partial class UserRole
 {
     [Key]
@@ -14,10 +15,10 @@ public partial class UserRole
     public int UserRoleId { get; set; }
 
     [Column("UserID")]
-    public int? UserId { get; set; }
+    public int UserId { get; set; }
 
     [Column("RoleID")]
-    public short? RoleId { get; set; }
+    public short RoleId { get; set; }
 
     public bool Status { get; set; }
 

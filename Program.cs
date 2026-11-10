@@ -49,3 +49,4 @@ app.MapGet("/api/health/database", async (ApplicationDbContext db) =>
 });
 
 app.Run();
+public partial class Program;

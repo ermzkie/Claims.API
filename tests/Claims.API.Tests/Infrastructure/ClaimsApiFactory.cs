@@ -30,6 +30,8 @@ public class ClaimsApiFactory : WebApplicationFactory<Program>
     builder.UseSetting("Jwt:SigningKey", SigningKey);
     builder.UseSetting("Jwt:Issuer", "Claims.API");
     builder.UseSetting("Jwt:Audience", "Claims.Web");
+    // Program.cs requires a connection string at startup; tests replace the DbContext with SQLite below.
+    builder.UseSetting("ConnectionStrings:DefaultConnection", "Server=unused;Database=unused");
 
     builder.ConfigureServices(services =>
     {

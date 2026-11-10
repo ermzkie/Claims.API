@@ -113,10 +113,10 @@ public class AuthService
                 u.Middlename,
                 u.Lastname,
                 u.MustChangePassword,
-                Roles = u.UserRoles
-                    .Where(ur => ur.Status && ur.Role.RoleName != null)
-                    .Select(ur => ur.Role.RoleName!)
-                    .ToList(),
+                Roles = (from ur in u.UserRoles
+                         join r in _db.Roles on ur.RoleId equals r.RoleId
+                         where ur.Status && r.RoleName != null
+                         select r.RoleName).ToList(),
             })
             .FirstOrDefaultAsync();
 
@@ -133,7 +133,7 @@ public class AuthService
             Middlename = user.Middlename,
             Lastname = user.Lastname,
             MustChangePassword = user.MustChangePassword,
-            Roles = user.Roles,
+            Roles = user.Roles.OfType<string>().ToList(),
         };
     }
 }

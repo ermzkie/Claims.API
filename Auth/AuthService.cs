@@ -73,8 +73,7 @@ public class AuthService
         var verify = PasswordHashing.Hasher.VerifyHashedPassword(user, user.PasswordHash, password);
         if (verify == PasswordVerificationResult.Failed)
         {
-            RecordFailedAttempt(user, now);
-            await _db.SaveChangesAsync();
+            await RecordFailedAttemptAsync(user.UserId, now);
             return new LoginResult(LoginOutcome.InvalidCredentials, null);
         }
 
@@ -125,8 +124,7 @@ public class AuthService
                 != PasswordVerificationResult.Failed;
         if (!verified)
         {
-            RecordFailedAttempt(user, now);
-            await _db.SaveChangesAsync();
+            await RecordFailedAttemptAsync(user.UserId, now);
             return new ChangePasswordResult(ChangePasswordOutcome.WrongCurrentPassword, null);
         }
 
@@ -147,14 +145,18 @@ public class AuthService
         return new ChangePasswordResult(ChangePasswordOutcome.Success, null);
     }
 
-    private static void RecordFailedAttempt(User user, DateTime now)
+    // Set-based so concurrent wrong guesses cannot read the same counter value. The tracked entity is
+    // not modified on the failure path, so a later SaveChanges cannot overwrite these columns.
+    private async Task RecordFailedAttemptAsync(int userId, DateTime now)
     {
-        user.FailedLoginCount++;
-        if (user.FailedLoginCount >= MaxFailedAttempts)
-        {
-            user.LockoutEnd = now + LockoutDuration;
-            user.FailedLoginCount = 0;
-        }
+        await _db.Users.Where(u => u.UserId == userId)
+            .ExecuteUpdateAsync(s => s.SetProperty(u => u.FailedLoginCount, u => u.FailedLoginCount + 1));
+
+        DateTime? lockoutEnd = now + LockoutDuration;
+        await _db.Users.Where(u => u.UserId == userId && u.FailedLoginCount >= MaxFailedAttempts)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(u => u.LockoutEnd, lockoutEnd)
+                .SetProperty(u => u.FailedLoginCount, 0));
     }
 
     public async Task<CurrentUserDto?> GetCurrentUserAsync(int userId)

@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Claims.API.Models;
 
 [Table("UserRole")]
+[Index("UserId", "RoleId", Name = "UX_UserRole_User_Role", IsUnique = true)]
 public partial class UserRole
 {
     [Key]
@@ -14,10 +15,10 @@ public partial class UserRole
     public int UserRoleId { get; set; }
 
     [Column("UserID")]
-    public int? UserId { get; set; }
+    public int UserId { get; set; }
 
     [Column("RoleID")]
-    public short? RoleId { get; set; }
+    public short RoleId { get; set; }
 
     public bool Status { get; set; }
 
@@ -33,9 +34,9 @@ public partial class UserRole
 
     [ForeignKey("RoleId")]
     [InverseProperty("UserRoles")]
-    public virtual Role? Role { get; set; }
+    public virtual Role Role { get; set; } = null!;
 
     [ForeignKey("UserId")]
     [InverseProperty("UserRoles")]
-    public virtual User? User { get; set; }
+    public virtual User User { get; set; } = null!;
 }

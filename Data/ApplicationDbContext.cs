@@ -26,6 +26,8 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<FamilyComposition> FamilyCompositions { get; set; }
 
+    public virtual DbSet<FundSource> FundSources { get; set; }
+
     public virtual DbSet<ModeOfAssistance> ModeOfAssistances { get; set; }
 
     public virtual DbSet<NameSuffix> NameSuffixes { get; set; }
@@ -104,6 +106,15 @@ public partial class ApplicationDbContext : DbContext
             entity.HasOne(d => d.RelationshipStatus).WithMany(p => p.FamilyCompositions).HasConstraintName("FK_FamilyComposition_RelationshipStatus");
         });
 
+        modelBuilder.Entity<FundSource>(entity =>
+        {
+            entity.Property(e => e.FundSourceId).ValueGeneratedNever();
+            entity.Property(e => e.DateEn).IsFixedLength();
+            entity.Property(e => e.Stat).IsFixedLength();
+
+            entity.HasOne(d => d.Source).WithMany(p => p.FundSources).HasConstraintName("FK_FundSource_SourceOfAssistance");
+        });
+
         modelBuilder.Entity<NameSuffix>(entity =>
         {
             entity.Property(e => e.NameSuffixId).ValueGeneratedNever();
@@ -147,17 +158,18 @@ public partial class ApplicationDbContext : DbContext
         {
             entity.Property(e => e.TransactionId).ValueGeneratedNever();
             entity.Property(e => e.DateCreated).HasDefaultValueSql("(getdate())", "DF_Transactions_DateCreated");
+            entity.Property(e => e.IsReleased).HasDefaultValue(false, "DF_Transactions_IsReleased");
             entity.Property(e => e.Status).HasDefaultValue(true, "DF_Transactions_isActive");
 
             entity.HasOne(d => d.Creditor).WithMany(p => p.Transactions).HasConstraintName("FK_Transactions_Creditor");
+
+            entity.HasOne(d => d.FundSource).WithMany(p => p.Transactions).HasConstraintName("FK_Transactions_FundSource");
 
             entity.HasOne(d => d.Mode).WithMany(p => p.Transactions).HasConstraintName("FK_Transactions_ModeOfAssistance");
 
             entity.HasOne(d => d.PatientPerson).WithMany(p => p.TransactionPatientPeople).HasConstraintName("FK_Transactions_Person");
 
             entity.HasOne(d => d.RepresentativePerson).WithMany(p => p.TransactionRepresentativePeople).HasConstraintName("FK_Transactions_Representative");
-
-            entity.HasOne(d => d.Source).WithMany(p => p.Transactions).HasConstraintName("FK_Transactions_SourceOfAssistance");
         });
 
         modelBuilder.Entity<TransactionService>(entity =>
@@ -184,9 +196,13 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.DateCreated).HasDefaultValueSql("(getdate())", "DF_UserRole_DateCreated");
             entity.Property(e => e.Status).HasDefaultValue(true, "DF_UserRole_Status");
 
-            entity.HasOne(d => d.Role).WithMany(p => p.UserRoles).HasConstraintName("FK_UserRole_Role");
+            entity.HasOne(d => d.Role).WithMany(p => p.UserRoles)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_UserRole_Role");
 
-            entity.HasOne(d => d.User).WithMany(p => p.UserRoles).HasConstraintName("FK_UserRole_User");
+            entity.HasOne(d => d.User).WithMany(p => p.UserRoles)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_UserRole_User");
         });
 
         OnModelCreatingPartial(modelBuilder);

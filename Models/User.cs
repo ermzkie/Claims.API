@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Claims.API.Models;
 
 [Table("User")]
+[Index("Username", Name = "UX_User_Username", IsUnique = true)]
 public partial class User
 {
     [Key]
@@ -15,11 +16,11 @@ public partial class User
 
     [StringLength(50)]
     [Unicode(false)]
-    public string? Username { get; set; }
+    public string Username { get; set; } = null!;
 
-    [StringLength(50)]
+    [StringLength(255)]
     [Unicode(false)]
-    public string? Password { get; set; }
+    public string Password { get; set; } = null!;
 
     [StringLength(50)]
     [Unicode(false)]
@@ -47,6 +48,16 @@ public partial class User
     public DateTime? DateLastUpdated { get; set; }
 
     public bool Status { get; set; }
+
+    public bool MustChangePassword { get; set; }
+
+    public int FailedLoginCount { get; set; }
+
+    [Column(TypeName = "datetime")]
+    public DateTime? LockoutEnd { get; set; }
+
+    [Column(TypeName = "datetime")]
+    public DateTime? LastLoginDate { get; set; }
 
     [ForeignKey("NameSuffixId")]
     [InverseProperty("Users")]

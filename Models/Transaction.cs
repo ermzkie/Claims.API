@@ -37,8 +37,8 @@ public partial class Transaction
     [Unicode(false)]
     public string? Representative { get; set; }
 
-    [Column("SourceID")]
-    public short? SourceId { get; set; }
+    [Column("FundSourceID")]
+    public int? FundSourceId { get; set; }
 
     [Column("CreditorID")]
     public int? CreditorId { get; set; }
@@ -54,6 +54,8 @@ public partial class Transaction
 
     [Unicode(false)]
     public string? Remarks { get; set; }
+
+    public bool? IsReleased { get; set; }
 
     public bool? Status { get; set; }
 
@@ -71,6 +73,10 @@ public partial class Transaction
     [InverseProperty("Transactions")]
     public virtual Creditor? Creditor { get; set; }
 
+    [ForeignKey("FundSourceId")]
+    [InverseProperty("Transactions")]
+    public virtual FundSource? FundSource { get; set; }
+
     [ForeignKey("ModeId")]
     [InverseProperty("Transactions")]
     public virtual ModeOfAssistance? Mode { get; set; }
@@ -82,10 +88,6 @@ public partial class Transaction
     [ForeignKey("RepresentativePersonId")]
     [InverseProperty("TransactionRepresentativePeople")]
     public virtual Person? RepresentativePerson { get; set; }
-
-    [ForeignKey("SourceId")]
-    [InverseProperty("Transactions")]
-    public virtual SourceOfAssistance? Source { get; set; }
 
     [InverseProperty("Transaction")]
     public virtual ICollection<TransactionService> TransactionServices { get; set; } = new List<TransactionService>();

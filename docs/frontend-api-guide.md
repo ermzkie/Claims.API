@@ -46,7 +46,8 @@ The page only exists in Development. It is not available on the server.
 | POST | `/api/users/{id}/activate` | Admin / Super Admin | Turn account on |
 
 Role IDs: 1 Super Administrator, 2 Administrator, 3 Frontliner, 4 Social Worker.
-Administrators can only manage Frontliner and Social Worker accounts.
+Administrators can only manage Frontliner and Social Worker accounts. Nobody can give the Super
+Administrator role from the app (403).
 
 ### Login response
 

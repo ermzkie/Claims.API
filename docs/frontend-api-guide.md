@@ -214,8 +214,13 @@ Swagger is always the up-to-date list. This table is a summary.
 ### Things to know about accounts
 
 - Wrong password and unknown username give the same message on purpose.
-- After 5 wrong passwords the account is locked for 15 minutes (`code: locked_out`). An admin can
+- After 10 wrong passwords the account is locked for 5 minutes (`code: locked_out`). An admin can
   unlock it early with reset-password.
+- The last 3 tries before that warn in the message ("Invalid username or password. 3 attempts
+  left before the account is locked for 5 minutes."), and a locked account says how long to wait
+  ("Too many failed attempts. Try again in 5 minutes."). The login page just shows `message`.
+- Unknown usernames and deactivated accounts get the same messages and countdown, so the login
+  page never reveals which usernames exist.
 - A user with a temporary password can only change their password until they do. The login page
   and `RequireAuth` already send them there.
 - If an admin deactivates someone or removes a role, it applies on that user's next request, even

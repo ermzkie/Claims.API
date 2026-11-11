@@ -14,7 +14,11 @@ public enum LoginOutcome
   LockedOut,
 }
 
-public record LoginResult(LoginOutcome Outcome, LoginResponseDto? Response);
+// AttemptsLeft: wrong tries left before lockout (InvalidCredentials). RetryAfter: time until unlock (LockedOut).
+public record LoginResult(
+  LoginOutcome Outcome, LoginResponseDto? Response, int AttemptsLeft = 0, TimeSpan RetryAfter = default);
+
+public record FailedAttempt(int FailedCount, DateTime? LockoutEnd);
 
 public enum ChangePasswordOutcome
 {
@@ -28,18 +32,20 @@ public record ChangePasswordResult(ChangePasswordOutcome Outcome, string? Messag
 
 public class AuthService
 {
-  public const int MaxFailedAttempts = 5;
-  public static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
+  public const int MaxFailedAttempts = 10;
+  public static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(5);
 
   private readonly ApplicationDbContext _db;
   private readonly TokenService _tokens;
   private readonly TimeProvider _time;
+  private readonly UnknownUsernameAttempts _unknownAttempts;
 
-  public AuthService(ApplicationDbContext db, TokenService tokens, TimeProvider time)
+  public AuthService(ApplicationDbContext db, TokenService tokens, TimeProvider time, UnknownUsernameAttempts unknownAttempts)
   {
     _db = db;
     _tokens = tokens;
     _time = time;
+    _unknownAttempts = unknownAttempts;
   }
 
   public async Task<LoginResult> LoginAsync(string? username, string? password)
@@ -53,32 +59,31 @@ public class AuthService
     var normalized = username.Trim().ToLowerInvariant();
     var user = await _db.Users.FirstOrDefaultAsync(u => u.Username.ToLower() == normalized);
 
-    // Unknown user: spend the same hashing time, then fail generically
-    if (user is null)
-    {
-      PasswordHashing.Hasher.VerifyHashedPassword(new User(), PasswordHashing.DummyHash, password);
-      return new LoginResult(LoginOutcome.InvalidCredentials, null);
-    }
-
     var now = _time.GetLocalNow().DateTime;
 
-    // Locked out: no verification, no counter change
-    if (user.LockoutEnd > now)
+    // Unknown user: same hashing time, same countdown and lockout as a real account
+    if (user is null)
     {
-      return new LoginResult(LoginOutcome.LockedOut, null);
+      if (_unknownAttempts.LockoutEnd(normalized) is { } unknownLockoutEnd && unknownLockoutEnd > now)
+      {
+        return Locked(unknownLockoutEnd, now);
+      }
+      PasswordHashing.Hasher.VerifyHashedPassword(new User(), PasswordHashing.DummyHash, password);
+      return Failed(_unknownAttempts.RecordFailure(normalized, now), now);
+    }
+
+    // Locked out: no verification, no counter change
+    if (user.LockoutEnd is { } lockoutEnd && lockoutEnd > now)
+    {
+      return Locked(lockoutEnd, now);
     }
 
     var verify = PasswordHashing.Hasher.VerifyHashedPassword(user, user.PasswordHash, password);
-    if (verify == PasswordVerificationResult.Failed)
-    {
-      await RecordFailedAttemptAsync(user.UserId, now);
-      return new LoginResult(LoginOutcome.InvalidCredentials, null);
-    }
 
-    // Correct password but deactivated: indistinguishable from a wrong password
-    if (!user.Status)
+    // Deactivated counts as a failure even with the right password, so it looks like a wrong password
+    if (verify == PasswordVerificationResult.Failed || !user.Status)
     {
-      return new LoginResult(LoginOutcome.InvalidCredentials, null);
+      return Failed(await RecordFailedAttemptAsync(user.UserId, now), now);
     }
 
     user.FailedLoginCount = 0;
@@ -144,7 +149,7 @@ public class AuthService
 
   // Set-based so concurrent wrong guesses cannot read the same counter value. The tracked entity is
   // not modified on the failure path, so a later SaveChanges cannot overwrite these columns.
-  private async Task RecordFailedAttemptAsync(int userId, DateTime now)
+  private async Task<FailedAttempt> RecordFailedAttemptAsync(int userId, DateTime now)
   {
     await _db.Users.Where(u => u.UserId == userId)
       .ExecuteUpdateAsync(s => s.SetProperty(u => u.FailedLoginCount, u => u.FailedLoginCount + 1));
@@ -154,7 +159,21 @@ public class AuthService
       .ExecuteUpdateAsync(s => s
         .SetProperty(u => u.LockoutEnd, lockoutEnd)
         .SetProperty(u => u.FailedLoginCount, 0));
+
+    var state = await _db.Users.AsNoTracking()
+      .Where(u => u.UserId == userId)
+      .Select(u => new { u.FailedLoginCount, u.LockoutEnd })
+      .SingleAsync();
+    return new FailedAttempt(state.FailedLoginCount, state.LockoutEnd > now ? state.LockoutEnd : null);
   }
+
+  private static LoginResult Locked(DateTime lockoutEnd, DateTime now) =>
+    new(LoginOutcome.LockedOut, null, RetryAfter: lockoutEnd - now);
+
+  private static LoginResult Failed(FailedAttempt attempt, DateTime now) =>
+    attempt.LockoutEnd is { } lockoutEnd
+      ? Locked(lockoutEnd, now)
+      : new(LoginOutcome.InvalidCredentials, null, AttemptsLeft: MaxFailedAttempts - attempt.FailedCount);
 
   public async Task<CurrentUserDto?> GetCurrentUserAsync(int userId)
   {

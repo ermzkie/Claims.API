@@ -74,6 +74,8 @@ Rules:
 - You can't deactivate yourself, change your own roles or reset your own password
   (use change-password).
 - The API refuses anything that would leave no active Super Administrator.
+- Nobody can give the Super Administrator role from the app, not even a Super Administrator.
+  New Super Administrators are set up directly in the database. Existing ones keep the role.
 - No delete. Other tables reference `UserID`, so accounts are deactivated instead.
 
 ## Other endpoints

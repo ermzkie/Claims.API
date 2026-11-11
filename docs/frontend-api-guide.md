@@ -76,7 +76,8 @@ for the frontend to act on.
 
 ```json
 { "message": "Invalid username or password." }
-{ "message": "Too many failed attempts. Try again later.", "code": "locked_out" }
+{ "message": "Invalid username or password. 3 attempts left before the account is locked for 5 minutes." }
+{ "message": "Too many failed attempts. Try again in 5 minutes.", "code": "locked_out" }
 { "message": "You must change your password before continuing.", "code": "password_change_required" }
 ```
 
@@ -95,7 +96,8 @@ for the frontend to act on.
 Notes:
 - **Wrong password** and **unknown username** give the same 401 message on purpose. Don't try to
   tell them apart.
-- After **10 wrong passwords** the account is locked for 5 minutes (`code: locked_out`).
+- After **10 wrong passwords** the account is locked for 5 minutes (`code: locked_out`). The
+  last 3 tries before that already warn in the message. Just show `message`.
   An admin can unlock it early with reset-password.
 - A user with `mustChangePassword: true` can only call `/api/auth/me` and
   `/api/auth/change-password` until they change it. Send them straight to the change password page

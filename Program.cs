@@ -37,6 +37,10 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<Claims.API.Services.UserAdminService>();
 builder.Services.AddClaimsAuthentication(builder.Configuration);
 
+// Unhandled errors: short JSON message + reference id for the client, details in the log only
+builder.Services.AddExceptionHandler<Claims.API.Infrastructure.GlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
+
 // Register controllers
 builder.Services.AddControllers();
 
@@ -44,6 +48,9 @@ builder.Services.AddControllers();
 builder.Services.AddClaimsOpenApi();
 
 var app = builder.Build();
+
+// First in the pipeline so it catches errors from everything after it
+app.UseExceptionHandler();
 
 // Configure HTTP request pipeline
 if (app.Environment.IsDevelopment())

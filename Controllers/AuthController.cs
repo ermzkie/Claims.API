@@ -7,20 +7,13 @@ namespace Claims.API.Controllers;
 
 [Route("api/auth")]
 [ApiController]
-public class AuthController : ControllerBase
+public class AuthController(AuthService auth, ICurrentUser currentUser) : ControllerBase
 {
-  private readonly AuthService _auth;
-
-  public AuthController(AuthService auth)
-  {
-    _auth = auth;
-  }
-
   [HttpPost("login")]
   [AllowAnonymous]
   public async Task<ActionResult<LoginResponseDto>> Login([FromBody] LoginRequestDto request)
   {
-    var result = await _auth.LoginAsync(request.Username, request.Password);
+    var result = await auth.LoginAsync(request.Username, request.Password);
 
     return result.Outcome switch
     {
@@ -35,7 +28,7 @@ public class AuthController : ControllerBase
   [Authorize(Policy = AuthPolicies.AllowPendingPasswordChange)]
   public async Task<ActionResult<CurrentUserDto>> Me()
   {
-    var current = await _auth.GetCurrentUserAsync(User.GetUserId());
+    var current = await currentUser.GetProfileAsync();
     return current is null ? Unauthorized() : Ok(current);
   }
 
@@ -43,7 +36,7 @@ public class AuthController : ControllerBase
   [Authorize(Policy = AuthPolicies.AllowPendingPasswordChange)]
   public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequestDto request)
   {
-    var result = await _auth.ChangePasswordAsync(User.GetUserId(), request.CurrentPassword, request.NewPassword);
+    var result = await auth.ChangePasswordAsync(currentUser.Id, request.CurrentPassword, request.NewPassword);
 
     return result.Outcome switch
     {

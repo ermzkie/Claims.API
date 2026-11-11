@@ -37,8 +37,8 @@ public partial class Transaction
     [Unicode(false)]
     public string? Representative { get; set; }
 
-    [Column("SourceID")]
-    public short? SourceId { get; set; }
+    [Column("FundSourceID")]
+    public int? FundSourceId { get; set; }
 
     [Column("CreditorID")]
     public int? CreditorId { get; set; }
@@ -55,6 +55,8 @@ public partial class Transaction
     [Unicode(false)]
     public string? Remarks { get; set; }
 
+    public bool? IsReleased { get; set; }
+
     public bool? Status { get; set; }
 
     public int? CreatedBy { get; set; }
@@ -66,6 +68,10 @@ public partial class Transaction
 
     [Column(TypeName = "datetime")]
     public DateTime? DateLastUpdated { get; set; }
+
+    // Social worker who handled the claim (new system). Migrated rows use SocialWorkerId instead.
+    [Column("SocialWorkerUserID")]
+    public int? SocialWorkerUserId { get; set; }
 
     [ForeignKey("CreditorId")]
     [InverseProperty("Transactions")]
@@ -83,9 +89,12 @@ public partial class Transaction
     [InverseProperty("TransactionRepresentativePeople")]
     public virtual Person? RepresentativePerson { get; set; }
 
-    [ForeignKey("SourceId")]
+    [ForeignKey("FundSourceId")]
     [InverseProperty("Transactions")]
-    public virtual SourceOfAssistance? Source { get; set; }
+    public virtual FundSource? FundSource { get; set; }
+
+    [ForeignKey("SocialWorkerUserId")]
+    public virtual User? SocialWorkerUser { get; set; }
 
     [InverseProperty("Transaction")]
     public virtual ICollection<TransactionService> TransactionServices { get; set; } = new List<TransactionService>();

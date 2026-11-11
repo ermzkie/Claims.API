@@ -1,3 +1,4 @@
+using Claims.API.Auth;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -251,7 +252,7 @@ public class UserAdminTests
     await using var app = await SeedAsync();
     var admin = await LoginAsAsync(app, "admin", Pw);
     var anon = app.CreateClient();
-    for (var i = 0; i < 5; i++)
+    for (var i = 0; i < AuthService.MaxFailedAttempts; i++)
     {
       await anon.PostAsJsonAsync("/api/auth/login", new { username = "sw", password = "wrong-password" });
     }

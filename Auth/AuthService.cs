@@ -28,8 +28,8 @@ public record ChangePasswordResult(ChangePasswordOutcome Outcome, string? Messag
 
 public class AuthService
 {
-  public const int MaxFailedAttempts = 5;
-  public static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
+  public const int MaxFailedAttempts = 10;
+  public static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(5);
 
   private readonly ApplicationDbContext _db;
   private readonly TokenService _tokens;

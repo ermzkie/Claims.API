@@ -95,7 +95,7 @@ for the frontend to act on.
 Notes:
 - **Wrong password** and **unknown username** give the same 401 message on purpose. Don't try to
   tell them apart.
-- After **5 wrong passwords** the account is locked for 15 minutes (`code: locked_out`).
+- After **10 wrong passwords** the account is locked for 5 minutes (`code: locked_out`).
   An admin can unlock it early with reset-password.
 - A user with `mustChangePassword: true` can only call `/api/auth/me` and
   `/api/auth/change-password` until they change it. Send them straight to the change password page

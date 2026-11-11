@@ -119,14 +119,14 @@ public class LoginTests
   }
 
   [Fact]
-  public async Task Login_FiveFailures_LocksFor15Minutes()
+  public async Task Login_TenFailures_LocksFor5Minutes()
   {
     await using var app = new ClaimsApiFactory();
     await SeedRolesAsync(app);
     await CreateUserAsync(app, "maria", Pw, "Frontliner");
     var client = app.CreateClient();
 
-    for (var i = 0; i < 5; i++)
+    for (var i = 0; i < 10; i++)
     {
       var r = await PostLogin(client, "maria", "wrong-password");
       Assert.Equal(HttpStatusCode.Unauthorized, r.StatusCode);
@@ -139,20 +139,23 @@ public class LoginTests
       Assert.Equal("locked_out", json.RootElement.GetProperty("code").GetString());
     }
 
-    app.Clock.Advance(TimeSpan.FromMinutes(15) + TimeSpan.FromSeconds(1));
+    app.Clock.Advance(TimeSpan.FromMinutes(5) - TimeSpan.FromSeconds(1));
+    Assert.Equal(HttpStatusCode.Unauthorized, (await PostLogin(client, "maria", Pw)).StatusCode);
+
+    app.Clock.Advance(TimeSpan.FromSeconds(2));
     var ok = await PostLogin(client, "maria", Pw);
     Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
   }
 
   [Fact]
-  public async Task Login_FourFailuresThenSuccess_ResetsCounter()
+  public async Task Login_NineFailuresThenSuccess_ResetsCounter()
   {
     await using var app = new ClaimsApiFactory();
     await SeedRolesAsync(app);
     await CreateUserAsync(app, "maria", Pw, "Frontliner");
     var client = app.CreateClient();
 
-    for (var i = 0; i < 4; i++)
+    for (var i = 0; i < 9; i++)
     {
       await PostLogin(client, "maria", "wrong-password");
     }

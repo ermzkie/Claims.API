@@ -35,10 +35,10 @@ for plaintext. Passwords are stored as ASP.NET Core Identity hashes (PBKDF2).
 ## Login
 
 - Wrong username, wrong password and deactivated account all return the same 401.
-- 5 wrong passwords in a row locks the account for 15 minutes. A locked account gets
+- 10 wrong passwords in a row locks the account for 5 minutes. A locked account gets
   "Too many failed attempts. Try again later."
 - Lockout doesn't kick out sessions the user already has, otherwise anyone could
-  log someone out by typing their username wrong 5 times.
+  log someone out by typing their username wrong 10 times.
 
 ## Temporary passwords
 

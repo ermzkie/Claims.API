@@ -87,6 +87,24 @@ public class LoginWarningTests
   }
 
   [Fact]
+  public async Task Counter_DoesNotResetWithTime_ForRealOrUnknownUsers()
+  {
+    await using var app = await StartAsync();
+    var client = app.CreateClient();
+    for (var i = 0; i < 6; i++)
+    {
+      await Login(client, "maria", "wrong-password");
+      await Login(client, "nobody", "wrong-password");
+    }
+
+    app.Clock.Advance(TimeSpan.FromHours(3));
+
+    var real = await Login(client, "maria", "wrong-password");
+    Assert.Contains("3 attempts left", real.Message);
+    Assert.Equal(real, await Login(client, "nobody", "wrong-password"));
+  }
+
+  [Fact]
   public async Task UnknownUser_UnlocksAfterLockout()
   {
     await using var app = await StartAsync();

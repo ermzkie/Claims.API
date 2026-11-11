@@ -41,7 +41,7 @@ for plaintext. Passwords are stored as ASP.NET Core Identity hashes (PBKDF2).
   attempts. Try again in N minutes."
 - Unknown usernames and deactivated accounts get exactly the same messages, countdown and
   lockout, so the login page never reveals which usernames exist. Unknown usernames are
-  counted in memory (up to 10,000 names, forgotten after an hour without tries or on restart).
+  counted in memory (up to 100,000 names, reset when the API restarts).
 - Lockout doesn't kick out sessions the user already has, otherwise anyone could
   log someone out by typing their username wrong 10 times.
 

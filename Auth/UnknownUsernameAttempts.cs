@@ -4,10 +4,12 @@ namespace Claims.API.Auth;
 
 // Failed-login counter for usernames that don't exist, so they get the same countdown and lockout
 // as real accounts and the login response never reveals whether a username is real.
-// Kept in memory with a size cap: random usernames can't grow it without limit.
+// Like a real account's counter, entries never expire with time; otherwise waiting would reveal
+// which names are real. The size cap stops random usernames from growing memory without limit.
+// Counters reset when the API restarts.
 public sealed class UnknownUsernameAttempts : IDisposable
 {
-  private const int MaxTrackedUsernames = 10_000;
+  private const int MaxTrackedUsernames = 100_000;
 
   private sealed class Entry
   {
@@ -25,7 +27,6 @@ public sealed class UnknownUsernameAttempts : IDisposable
     var entry = _cache.GetOrCreate(normalizedUsername, e =>
     {
       e.Size = 1;
-      e.SlidingExpiration = TimeSpan.FromHours(1);
       return new Entry();
     })!;
 

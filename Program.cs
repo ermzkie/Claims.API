@@ -41,14 +41,15 @@ builder.Services.AddClaimsAuthentication(builder.Configuration);
 builder.Services.AddControllers();
 
 // OpenAPI
-builder.Services.AddOpenApi();
+builder.Services.AddClaimsOpenApi();
 
 var app = builder.Build();
 
 // Configure HTTP request pipeline
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+    // API docs page at /swagger (development only)
+    app.UseClaimsSwaggerUi();
 }
 
 // IIS manages the HTTP/HTTPS bindings.

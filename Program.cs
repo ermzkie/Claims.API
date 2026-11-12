@@ -44,6 +44,7 @@ builder.Services.AddProblemDetails();
 
 // Register controllers
 builder.Services.AddControllers();
+builder.Services.AddScoped<Claims.API.Services.ReferenceDataService>();
 
 // OpenAPI
 builder.Services.AddClaimsOpenApi();

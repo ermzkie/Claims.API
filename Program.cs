@@ -35,6 +35,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<Claims.API.Services.UserAdminService>();
+builder.Services.AddScoped<Claims.API.Services.PersonService>();
 builder.Services.AddClaimsAuthentication(builder.Configuration);
 
 // Unhandled errors: short JSON message + reference id for the client, details in the log only
@@ -43,6 +44,7 @@ builder.Services.AddProblemDetails();
 
 // Register controllers
 builder.Services.AddControllers();
+builder.Services.AddScoped<Claims.API.Services.ReferenceDataService>();
 
 // OpenAPI
 builder.Services.AddClaimsOpenApi();

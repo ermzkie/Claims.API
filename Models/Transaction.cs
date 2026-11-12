@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Claims.API.Models;
 
+[Index("SocialWorkerUserId", Name = "IX_Transactions_SocialWorkerUserID")]
 public partial class Transaction
 {
     [Key]
@@ -57,7 +58,7 @@ public partial class Transaction
 
     public bool? IsReleased { get; set; }
 
-    public bool? Status { get; set; }
+    public bool Status { get; set; }
 
     public int? CreatedBy { get; set; }
 
@@ -69,13 +70,16 @@ public partial class Transaction
     [Column(TypeName = "datetime")]
     public DateTime? DateLastUpdated { get; set; }
 
-    // Social worker who handled the claim (new system). Migrated rows use SocialWorkerId instead.
     [Column("SocialWorkerUserID")]
     public int? SocialWorkerUserId { get; set; }
 
     [ForeignKey("CreditorId")]
     [InverseProperty("Transactions")]
     public virtual Creditor? Creditor { get; set; }
+
+    [ForeignKey("FundSourceId")]
+    [InverseProperty("Transactions")]
+    public virtual FundSource? FundSource { get; set; }
 
     [ForeignKey("ModeId")]
     [InverseProperty("Transactions")]
@@ -89,11 +93,8 @@ public partial class Transaction
     [InverseProperty("TransactionRepresentativePeople")]
     public virtual Person? RepresentativePerson { get; set; }
 
-    [ForeignKey("FundSourceId")]
-    [InverseProperty("Transactions")]
-    public virtual FundSource? FundSource { get; set; }
-
     [ForeignKey("SocialWorkerUserId")]
+    [InverseProperty("Transactions")]
     public virtual User? SocialWorkerUser { get; set; }
 
     [InverseProperty("Transaction")]

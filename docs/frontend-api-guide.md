@@ -204,6 +204,11 @@ pages added to `routes.js` are protected automatically.
 | POST                | `/api/users/{id}/activate`       | Admin / Super Admin | Turn account on                                                                               |
 | GET                 | `/api/natureofservice`           | logged in           | List natures of service                                                                       |
 | POST / PUT / DELETE | `/api/natureofservice[/{id}]`    | Admin / Super Admin | `{ natureDesc }`                                                                              |
+| GET                 | `/api/lookups/{list}`            | logged in           | Dropdown values `[{ id, code, name }]`: `sexes`, `civil-statuses`, `name-suffixes`, `relationship-statuses`, `modes-of-assistance`, `sources-of-assistance`, `provinces`, `cities?provinceId=`, `barangays?cityMunicipalityId=` |
+| GET                 | `/api/persons`                   | logged in           | Search, paged: `{ items, total, page, pageSize }`. Query: `search`, `cityMunicipalityId`, `barangayId`, `sexId`, `sector` (repeatable), `page`, `pageSize` (max 100) |
+| GET                 | `/api/persons/{id}`              | logged in           | One person with `family` and the barangay's `cityMunicipalityId` / `provinceId`                |
+| POST                | `/api/persons`                   | logged in           | Create (201 with the person). Body below                                                      |
+| PUT                 | `/api/persons/{id}`              | logged in           | Replace **all** fields (send the whole person, not only what changed)                         |
 
 Role IDs: 1 Super Administrator, 2 Administrator, 3 Frontliner, 4 Social Worker.
 Administrators can only manage Frontliner and Social Worker accounts. Nobody can give the Super
@@ -227,10 +232,34 @@ Swagger is always the up-to-date list. This table is a summary.
   if they are already logged in. `apiFetch` handles the 401 / 403.
 - `expiresAt` in the login response is server local time (Philippine time).
 
+### Things to know about persons
+
+Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuffixId`, `sexId`,
+`civilStatusId`, `birthdate` (`"YYYY-MM-DD"`), `contactNo`, `skillOccupation`,
+`estimatedMonthlyIncome`, `barangayId`, `purokSubdivision`, `street`, `noBuildingName`,
+`isSeniorCitizen`, `isSoloParent`, `isPwd`, `isRr`, `is4P`.
+
+- **Search:** digits (with spaces, `+ - ( )`) match the person ID or part of the contact number;
+  anything else matches first / middle / last name, every word must match. Filters combine with
+  the text and with each other. `sector` is `senior`, `pwd`, `4ps` or `solo-parent`; a person
+  must have all the sectors given.
+- **Names** are saved in capitals. They may only contain letters (ñ and accents included), spaces,
+  `. ' -`. Old records with other characters (commas, slashes) can still be saved as long as the
+  name isn't changed.
+- **Contact no.:** digits, spaces, `+ - ( )`, with 7 to 15 digits. **Birthdate:** 1900 to today.
+  **Income:** 0 to 99,999,999.99, 2 decimals.
+- **Text vs IDs:** old records only have the sex, barangay and municipality as text. The API
+  returns that text as `sex`, `barangay` and `municipality`, and fills it from the IDs when a
+  person is saved, so always show those fields and send the IDs. Filter and report by the IDs.
+- Validation errors come back as 400 with a `message` to show, like everything else.
+
 ## Rules
 
 - The token stays in `sessionStorage`, handled by `client.js`. Don't copy it into `localStorage`,
   cookies, the URL or Redux, and never log it or a password.
+- To stay logged in while developing, put `VITE_KEEP_SESSION=true` in your own
+  `.env.development.local` (see the README, "Stay logged in while developing"). It only works on
+  `npm start`; a production build always uses `sessionStorage`.
 - Don't use `dangerouslySetInnerHTML` with data from the API. A script that gets onto the page can
   read the token.
 - Use IDs from the API (`userId`), not usernames, when calling other endpoints.

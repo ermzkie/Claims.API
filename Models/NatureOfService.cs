@@ -17,6 +17,18 @@ public partial class NatureOfService
     [Unicode(false)]
     public string? NatureDesc { get; set; }
 
+    public bool Status { get; set; } = true;
+
+    public int? CreatedBy { get; set; }
+
+    [Column(TypeName = "datetime")]
+    public DateTime DateCreated { get; set; }
+
+    public int? LastUpdatedBy { get; set; }
+
+    [Column(TypeName = "datetime")]
+    public DateTime? DateLastUpdated { get; set; }
+
     [InverseProperty("Nature")]
     public virtual ICollection<TransactionService> TransactionServices { get; set; } = new List<TransactionService>();
 }

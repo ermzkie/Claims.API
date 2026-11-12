@@ -13,48 +13,107 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
 {
   [HttpGet]
   public async Task<ActionResult<PagedResponseDto<TransactionResponseDto>>> GetAll(
-    DateTime? startDate,
-    DateTime? endDate,
-    int page = 1)
+          [FromQuery] TransactionQueryParameters parameters)
   {
     const int pageSize = 10;
 
-    if (page < 1)
-      page = 1;
+    // Validate pagination
+    if (parameters.Page < 1)
+      return BadRequest("Page must be greater than 0.");
 
+    // Validate date range
+    if (parameters.StartDate.HasValue &&
+        parameters.EndDate.HasValue &&
+        parameters.StartDate.Value.Date > parameters.EndDate.Value.Date)
+    {
+      return BadRequest("Start date cannot be later than end date.");
+    }
+
+    // Base query
     var query = context.Transactions
         .AsNoTracking()
         .AsQueryable();
 
-    // Filter by start date
-    if (startDate.HasValue)
+    // 1. Date filtering
+    if (parameters.StartDate.HasValue)
     {
-      query = query.Where(x => x.Date >= startDate.Value);
+      query = query.Where(x =>
+          x.Date >= parameters.StartDate.Value.Date);
     }
 
-    // Filter by end date (inclusive)
-    if (endDate.HasValue)
+    if (parameters.EndDate.HasValue)
     {
-      var exclusiveEndDate = endDate.Value.Date.AddDays(1);
+      var exclusiveEndDate =
+          parameters.EndDate.Value.Date.AddDays(1);
 
-      query = query.Where(x => x.Date < exclusiveEndDate);
+      query = query.Where(x =>
+          x.Date < exclusiveEndDate);
     }
 
+    // 2. Search by transaction number
+    if (!string.IsNullOrWhiteSpace(parameters.Search))
+    {
+      var search = parameters.Search.Trim();
+
+      query = query.Where(x =>
+          !string.IsNullOrEmpty(x.RefNo) &&
+          x.RefNo.Contains(search));
+    }
+
+    // Count filtered records before pagination
     var totalRecords = await query.CountAsync();
 
-    var transactions = await query
-        .OrderByDescending(x => x.Date)
-        .ThenBy(x => x.TransactionId)
-        .Skip((page - 1) * pageSize)
+    // 3. Sorting
+    var sortBy = parameters.SortBy?.Trim().ToLowerInvariant();
+    var sortDirection = parameters.SortDirection?
+        .Trim().ToLowerInvariant();
+
+    bool descending = sortDirection != "asc";
+
+    IOrderedQueryable<Transaction> orderedQuery;
+
+    orderedQuery = sortBy switch
+    {
+      "transactionid" => descending
+          ? query.OrderByDescending(x => x.TransactionId)
+          : query.OrderBy(x => x.TransactionId),
+
+      "transactionnumber" => descending
+          ? query.OrderByDescending(x => x.RefNo)
+          : query.OrderBy(x => x.RefNo),
+
+      "status" => descending
+          ? query.OrderByDescending(x => x.Status)
+          : query.OrderBy(x => x.Status),
+
+      "date" or null or "" => descending
+          ? query.OrderByDescending(x => x.Date)
+          : query.OrderBy(x => x.Date),
+
+      _ => descending
+          ? query.OrderByDescending(x => x.Date)
+          : query.OrderBy(x => x.Date)
+    };
+
+    // Ensure consistent ordering when multiple records
+    // have the same sorting value.
+    orderedQuery = orderedQuery.ThenBy(x => x.TransactionId);
+
+    // 4. Pagination
+    var transactions = await orderedQuery
+        .Skip((parameters.Page - 1) * pageSize)
         .Take(pageSize)
         .ToListAsync();
 
+    // 5. Build response
     var response = new PagedResponseDto<TransactionResponseDto>
     {
-      Page = page,
+      Page = parameters.Page,
       PageSize = pageSize,
       TotalRecords = totalRecords,
-      TotalPages = (int)Math.Ceiling((double)totalRecords / pageSize),
+      TotalPages = (int)Math.Ceiling(
+            (double)totalRecords / pageSize),
+
       Data = transactions.Select(ToResponse).ToList()
     };
 

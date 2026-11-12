@@ -133,24 +133,23 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
       : Ok(ToResponse(transaction));
   }
 
-  [HttpPost]
+  [HttpPost("save")]
   public async Task<ActionResult<TransactionResponseDto>> SaveTransaction(SaveTransactionDto dto)
   {
     var now = DateTime.UtcNow.AddHours(8);
-    var transaction = await context.Transactions
-      .FirstOrDefaultAsync(x => x.TransactionId == dto.TransactionId);
+    var transaction = dto.TransactionId.HasValue
+      ? await context.Transactions.FirstOrDefaultAsync(x => x.TransactionId == dto.TransactionId.Value)
+      : null;
     var isNew = transaction is null;
 
     if (transaction is null)
     {
       transaction = new Transaction
       {
-        TransactionId = dto.TransactionId,
         IsReleased = false,
         Status = true,
         CreatedBy = currentUser.Id,
         DateCreated = now,
-        SocialWorkerUserId = currentUser.Id,
       };
       context.Transactions.Add(transaction);
     }

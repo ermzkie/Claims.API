@@ -5,7 +5,7 @@ namespace Claims.API.DTOs.Transactions;
 public class SaveTransactionDto
 {
   [Range(1, int.MaxValue)]
-  public int TransactionId { get; set; }
+  public int? TransactionId { get; set; }
 
   [StringLength(50)]
   public string? AssistanceCode { get; set; }

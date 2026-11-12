@@ -6,7 +6,7 @@ using Claims.API.Auth;
 var builder = WebApplication.CreateBuilder(args);
 
 // Load User Secrets explicitly for IIS deployment
-var secretsPath = @"C:\Users\boxy\AppData\Roaming\Microsoft\UserSecrets\61f54422-232e-4ec6-997e-b0744d8bda60\secrets.json";
+var secretsPath = @"C:\Users\Erma\AppData\Roaming\Microsoft\UserSecrets\61f54422-232e-4ec6-997e-b0744d8bda60\secrets.json";
 
 builder.Configuration.AddJsonFile(
     secretsPath,
@@ -35,6 +35,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<Claims.API.Services.UserAdminService>();
+builder.Services.AddScoped<Claims.API.Services.PersonService>();
 builder.Services.AddClaimsAuthentication(builder.Configuration);
 
 // Unhandled errors: short JSON message + reference id for the client, details in the log only
@@ -42,12 +43,8 @@ builder.Services.AddExceptionHandler<Claims.API.Infrastructure.GlobalExceptionHa
 builder.Services.AddProblemDetails();
 
 // Register controllers
-builder.Services.AddControllers()
-    .AddJsonOptions(options =>
-    {
-        options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
-    });
-//builder.Services.AddControllers();
+builder.Services.AddControllers();
+builder.Services.AddScoped<Claims.API.Services.ReferenceDataService>();
 
 // OpenAPI
 builder.Services.AddClaimsOpenApi();

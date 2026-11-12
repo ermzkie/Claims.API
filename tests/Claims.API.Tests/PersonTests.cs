@@ -76,6 +76,8 @@ public class PersonTests
       Assert.Equal("Male", body.GetProperty("sex").GetString());
       Assert.Equal("Zone III", body.GetProperty("barangay").GetString());
       Assert.Equal("City of Koronadal", body.GetProperty("municipality").GetString());
+      Assert.Equal(10, body.GetProperty("cityMunicipalityId").GetInt32());
+      Assert.Equal(1, body.GetProperty("provinceId").GetInt32());
 
       await using var db = app.CreateDbContext();
       var saved = await db.People.AsNoTracking().SingleAsync(p => p.PersonId == id);

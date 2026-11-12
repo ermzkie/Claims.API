@@ -15,6 +15,8 @@ public class PersonDto
   public string? Street { get; set; }
   public string? PurokSubdivision { get; set; }
   public int? BarangayId { get; set; }
+  public int? CityMunicipalityId { get; set; }
+  public int? ProvinceId { get; set; }
   public string? Barangay { get; set; }
   public string? Municipality { get; set; }
   public bool? IsSeniorCitizen { get; set; }

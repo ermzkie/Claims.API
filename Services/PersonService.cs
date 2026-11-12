@@ -72,7 +72,17 @@ public class PersonService(ApplicationDbContext db, TimeProvider time)
         f.RelationshipStatus!.RelationshipStatusDesc))
       .ToListAsync();
 
-    return ToDto(person, family);
+    var place = person.BarangayId is { } barangayId
+      ? await db.Barangays.AsNoTracking()
+          .Where(b => b.BarangayId == barangayId)
+          .Select(b => new { b.CityMunicipalityId, b.CityMunicipality!.ProvinceId })
+          .FirstOrDefaultAsync()
+      : null;
+
+    var dto = ToDto(person, family);
+    dto.CityMunicipalityId = place?.CityMunicipalityId;
+    dto.ProvinceId = place?.ProvinceId;
+    return dto;
   }
 
   public async Task<PersonResult> CreateAsync(int actorId, SavePersonDto dto)

@@ -60,6 +60,26 @@ Swagger only exists in Development, not on the server.
 In Claims.Web, `npm start` and open http://localhost:3000. It forwards `/api` to port 5224, so
 just keep this API running. See [docs/frontend-api-guide.md](docs/frontend-api-guide.md).
 
+### 5. Optional: stay logged in while developing
+
+By default a login lasts 8 hours, and the frontend forgets it when the tab closes. On your own
+machine you can make it last up to 30 days:
+
+```powershell
+# Claims.API: tokens from your local API last 30 days
+dotnet user-secrets set "Jwt:LifetimeMinutes" "43200"
+```
+
+```
+# Claims.Web: create .env.development.local (it's not committed) with this line,
+# then restart npm start. The login now survives closing the tab.
+VITE_KEEP_SESSION=true
+```
+
+This only works in Development. On the server the API refuses to start if `Jwt:LifetimeMinutes`
+is over 1440 (24 hours), and without `VITE_KEEP_SESSION` the frontend keeps the token only for
+the tab. A deactivated account still stops working on its next request, even with a 30-day token.
+
 ## Tests
 
 ```powershell

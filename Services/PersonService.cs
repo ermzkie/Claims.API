@@ -123,8 +123,8 @@ public class PersonService(ApplicationDbContext db, TimeProvider time)
   // Validates and copies the DTO onto the entity. Returns an error message, or null when valid.
   private async Task<string?> ApplyAsync(Person person, SavePersonDto dto)
   {
-    var firstName = Clean(dto.FirstName);
-    var lastName = Clean(dto.LastName);
+    var firstName = Name(dto.FirstName);
+    var lastName = Name(dto.LastName);
     if (firstName is null)
     {
       return "First name is required.";
@@ -175,7 +175,7 @@ public class PersonService(ApplicationDbContext db, TimeProvider time)
     }
 
     person.FirstName = firstName;
-    person.MiddleName = Clean(dto.MiddleName);
+    person.MiddleName = Name(dto.MiddleName);
     person.LastName = lastName;
     person.NameSuffixId = dto.NameSuffixId;
     person.CivilStatusId = dto.CivilStatusId;
@@ -238,6 +238,9 @@ public class PersonService(ApplicationDbContext db, TimeProvider time)
   };
 
   private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+  // Names are stored in capitals, like every record from the old system.
+  private static string? Name(string? value) => Clean(value)?.ToUpperInvariant();
 
   private static string EscapeLike(string value) =>
     value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[");

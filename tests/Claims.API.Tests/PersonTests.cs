@@ -90,6 +90,22 @@ public class PersonTests
     }
   }
 
+  [Fact]
+  public async Task Create_SavesNamesInCapitals()
+  {
+    var (app, client, _) = await StartAsync();
+    await using (app)
+    {
+      var response = await client.PostAsJsonAsync("/api/persons",
+        new { firstName = " maría josé ", middleName = "Peña", lastName = "dela Cruz" });
+
+      var body = await Json(response);
+      Assert.Equal("MARÍA JOSÉ", body.GetProperty("firstName").GetString());
+      Assert.Equal("PEÑA", body.GetProperty("middleName").GetString());
+      Assert.Equal("DELA CRUZ", body.GetProperty("lastName").GetString());
+    }
+  }
+
   [Theory]
   [InlineData("", "Dela Cruz", "First name is required.")]
   [InlineData("Juan", "  ", "Last name is required.")]
@@ -145,7 +161,7 @@ public class PersonTests
       Assert.Equal(HttpStatusCode.OK, response.StatusCode);
       await using var db = app.CreateDbContext();
       var saved = await db.People.AsNoTracking().SingleAsync(p => p.PersonId == id);
-      Assert.Equal("Juana", saved.FirstName);
+      Assert.Equal("JUANA", saved.FirstName);
       Assert.Equal("Female", saved.Gender);
       Assert.Null(saved.BarangayId);
       Assert.Equal(userId, saved.LastUpdatedBy);

@@ -20,7 +20,6 @@ public class TransactionTests
 
     var create = await client.PostAsJsonAsync("/api/transactions", new
     {
-      transactionId = 41,
       refNo = "REF-41",
       amount = 125.50m,
     });
@@ -28,31 +27,31 @@ public class TransactionTests
     Assert.Equal(HttpStatusCode.Created, create.StatusCode);
     var created = await create.Content.ReadFromJsonAsync<TransactionResponseDto>();
     Assert.NotNull(created);
+    Assert.True(created.TransactionId > 0);
     Assert.Equal(userId, created.SocialWorkerUserId);
     Assert.Equal(userId, created.CreatedBy);
     Assert.True(created.Status);
+    var transactionId = created.TransactionId;
 
-    var duplicate = await client.PostAsJsonAsync("/api/transactions", new { transactionId = 41 });
-    Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
-
-    var update = await client.PutAsJsonAsync("/api/transactions/41", new
+    var update = await client.PostAsJsonAsync("/api/transactions", new
     {
+      transactionId,
       refNo = "REF-41-UPDATED",
       amount = 200m,
       isReleased = true,
     });
     Assert.Equal(HttpStatusCode.NoContent, update.StatusCode);
 
-    var updated = await client.GetFromJsonAsync<TransactionResponseDto>("/api/transactions/41");
+    var updated = await client.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{transactionId}");
     Assert.Equal("REF-41-UPDATED", updated!.RefNo);
     Assert.Equal(200m, updated.Amount);
     Assert.True(updated.IsReleased);
     Assert.Equal(userId, updated.LastUpdatedBy);
 
-    var delete = await client.DeleteAsync("/api/transactions/41");
+    var delete = await client.DeleteAsync($"/api/transactions/{transactionId}");
     Assert.Equal(HttpStatusCode.NoContent, delete.StatusCode);
 
-    var deleted = await client.GetFromJsonAsync<TransactionResponseDto>("/api/transactions/41");
+    var deleted = await client.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{transactionId}");
     Assert.False(deleted!.Status);
   }
 }

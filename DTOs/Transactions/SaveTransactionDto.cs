@@ -2,8 +2,11 @@ using System.ComponentModel.DataAnnotations;
 
 namespace Claims.API.DTOs.Transactions;
 
-public class UpdateTransactionDto
+public class SaveTransactionDto
 {
+  [Range(1, int.MaxValue)]
+  public int? TransactionId { get; set; }
+
   [StringLength(50)]
   public string? AssistanceCode { get; set; }
 

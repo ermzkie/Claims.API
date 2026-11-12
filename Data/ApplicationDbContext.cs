@@ -161,7 +161,6 @@ public partial class ApplicationDbContext : DbContext
 
         modelBuilder.Entity<Transaction>(entity =>
         {
-            entity.Property(e => e.TransactionId).ValueGeneratedNever();
             entity.Property(e => e.DateCreated).HasDefaultValueSql("(getdate())", "DF_Transactions_DateCreated");
             entity.Property(e => e.IsReleased).HasDefaultValue(false, "DF_Transactions_IsReleased");
             entity.Property(e => e.Status).HasDefaultValue(true, "DF_Transactions_isActive");

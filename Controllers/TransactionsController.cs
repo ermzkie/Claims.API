@@ -133,50 +133,33 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
       : Ok(ToResponse(transaction));
   }
 
-  [HttpPost]
-  public async Task<ActionResult<TransactionResponseDto>> Create(CreateTransactionDto dto)
+  [HttpPost("save")]
+  public async Task<ActionResult<TransactionResponseDto>> SaveTransaction(SaveTransactionDto dto)
   {
-    if (await context.Transactions.AnyAsync(x => x.TransactionId == dto.TransactionId))
-      return Conflict(new { message = "A transaction with this ID already exists." });
-
     var now = DateTime.UtcNow.AddHours(8);
-    var transaction = new Transaction
-    {
-      TransactionId = dto.TransactionId,
-      AssistanceCode = dto.AssistanceCode,
-      RefNo = dto.RefNo,
-      SocialWorkerId = dto.SocialWorkerId,
-      Date = dto.Date,
-      PatientPersonId = dto.PatientPersonId,
-      RepresentativePersonId = dto.RepresentativePersonId,
-      Representative = dto.Representative,
-      FundSourceId = dto.FundSourceId,
-      CreditorId = dto.CreditorId,
-      ModeId = dto.ModeId,
-      Amount = dto.Amount,
-      SocialWorkerAssessment = dto.SocialWorkerAssessment,
-      Remarks = dto.Remarks,
-      IsReleased = false,
-      Status = true,
-      CreatedBy = currentUser.Id,
-      DateCreated = now,
-      SocialWorkerUserId = currentUser.Id,
-    };
+    var transaction = dto.TransactionId.HasValue
+      ? await context.Transactions.FirstOrDefaultAsync(x => x.TransactionId == dto.TransactionId.Value)
+      : null;
+    var isNew = transaction is null;
 
-    context.Transactions.Add(transaction);
-    await context.SaveChangesAsync();
-
-    var response = ToResponse(transaction);
-    return CreatedAtAction(nameof(GetById), new { id = transaction.TransactionId }, response);
-  }
-
-  [HttpPut("{id:int}")]
-  public async Task<IActionResult> Update(int id, UpdateTransactionDto dto)
-  {
-    var transaction = await context.Transactions
-      .FirstOrDefaultAsync(x => x.TransactionId == id);
     if (transaction is null)
-      return NotFound(new { message = "Transaction not found." });
+    {
+      transaction = new Transaction
+      {
+        IsReleased = false,
+        Status = true,
+        CreatedBy = currentUser.Id,
+        DateCreated = now,
+      };
+      context.Transactions.Add(transaction);
+    }
+    else
+    {
+      transaction.LastUpdatedBy = currentUser.Id;
+      transaction.DateLastUpdated = now;
+      if (dto.IsReleased.HasValue)
+        transaction.IsReleased = dto.IsReleased.Value;
+    }
 
     transaction.AssistanceCode = dto.AssistanceCode;
     transaction.RefNo = dto.RefNo;
@@ -191,13 +174,12 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
     transaction.Amount = dto.Amount;
     transaction.SocialWorkerAssessment = dto.SocialWorkerAssessment;
     transaction.Remarks = dto.Remarks;
-    if (dto.IsReleased.HasValue)
-      transaction.IsReleased = dto.IsReleased.Value;
-    transaction.LastUpdatedBy = currentUser.Id;
-    transaction.DateLastUpdated = DateTime.UtcNow.AddHours(8);
 
     await context.SaveChangesAsync();
-    return NoContent();
+
+    return isNew
+      ? CreatedAtAction(nameof(GetById), new { id = transaction.TransactionId }, ToResponse(transaction))
+      : NoContent();
   }
 
   [HttpDelete("{id:int}")]

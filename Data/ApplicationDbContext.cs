@@ -111,6 +111,12 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.NameSuffixId).ValueGeneratedNever();
         });
 
+        modelBuilder.Entity<NatureOfService>(entity =>
+        {
+            entity.Property(e => e.DateCreated).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.Status).HasDefaultValue(true);
+        });
+
         modelBuilder.Entity<Officer>(entity =>
         {
             entity.Property(e => e.Idnumber).ValueGeneratedNever();

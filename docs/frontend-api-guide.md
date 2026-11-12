@@ -257,6 +257,9 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 
 - The token stays in `sessionStorage`, handled by `client.js`. Don't copy it into `localStorage`,
   cookies, the URL or Redux, and never log it or a password.
+- To stay logged in while developing, put `VITE_KEEP_SESSION=true` in your own
+  `.env.development.local` (see the README, "Stay logged in while developing"). It only works on
+  `npm start`; a production build always uses `sessionStorage`.
 - Don't use `dangerouslySetInnerHTML` with data from the API. A script that gets onto the page can
   read the token.
 - Use IDs from the API (`userId`), not usernames, when calling other endpoints.

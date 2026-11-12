@@ -31,22 +31,71 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
   [GeneratedRegex(@"^[0-9 +()\-]+$")]
   private static partial Regex ContactPattern();
 
-  public async Task<PagedResult<PersonListItemDto>> SearchAsync(string? search, int page, int pageSize)
+  [GeneratedRegex(@"^[0-9 +()\-]*[0-9][0-9 +()\-]*$")]
+  private static partial Regex NumberSearchPattern();
+
+  public static readonly IReadOnlyList<string> Sectors = ["senior", "pwd", "4ps", "solo-parent"];
+
+  public async Task<PagedResult<PersonListItemDto>?> SearchAsync(PersonSearchDto filter)
   {
-    page = Math.Max(1, page);
-    pageSize = pageSize <= 0 ? DefaultPageSize : Math.Min(pageSize, MaxPageSize);
+    var page = Math.Max(1, filter.Page);
+    var pageSize = filter.PageSize <= 0 ? DefaultPageSize : Math.Min(filter.PageSize, MaxPageSize);
+    var sectors = (filter.Sector ?? []).Select(s => s.Trim().ToLowerInvariant()).Distinct().ToList();
+    if (sectors.Any(s => !Sectors.Contains(s)))
+    {
+      return null;
+    }
 
     var query = db.People.AsNoTracking().Where(p => p.Status);
+    var search = filter.Search?.Trim() ?? "";
 
-    // Every word must appear in the first, middle or last name; "Dela Cruz, Juan" works too.
-    var words = (search ?? "").Split([' ', ','], StringSplitOptions.RemoveEmptyEntries);
-    foreach (var word in words)
+    if (NumberSearchPattern().IsMatch(search))
     {
-      var pattern = $"%{EscapeLike(word)}%";
+      // Only digits (and phone punctuation): an ID or part of a contact number.
+      var digits = new string(search.Where(char.IsAsciiDigit).ToArray());
+      var id = digits.Length <= 9 ? int.Parse(digits) : -1;
+      var contactPattern = $"%{digits}%";
       query = query.Where(p =>
-        EF.Functions.Like(p.FirstName!, pattern, "\\")
-        || EF.Functions.Like(p.MiddleName!, pattern, "\\")
-        || EF.Functions.Like(p.LastName!, pattern, "\\"));
+        p.PersonId == id
+        || (digits.Length >= 3 && EF.Functions.Like(
+          p.ContactNo!.Replace(" ", "").Replace("-", "").Replace("(", "").Replace(")", "").Replace("+", ""),
+          contactPattern)));
+    }
+    else
+    {
+      // Every word must appear in the first, middle or last name; "Dela Cruz, Juan" works too.
+      var words = search.Split([' ', ','], StringSplitOptions.RemoveEmptyEntries);
+      foreach (var word in words)
+      {
+        var pattern = $"%{EscapeLike(word)}%";
+        query = query.Where(p =>
+          EF.Functions.Like(p.FirstName!, pattern, "\\")
+          || EF.Functions.Like(p.MiddleName!, pattern, "\\")
+          || EF.Functions.Like(p.LastName!, pattern, "\\"));
+      }
+    }
+
+    if (filter.BarangayId is { } barangayId)
+    {
+      query = query.Where(p => p.BarangayId == barangayId);
+    }
+    else if (filter.CityMunicipalityId is { } cityId)
+    {
+      query = query.Where(p => p.BarangayNavigation!.CityMunicipalityId == cityId);
+    }
+    if (filter.SexId is { } sexId)
+    {
+      query = query.Where(p => p.SexId == sexId);
+    }
+    foreach (var sector in sectors)
+    {
+      query = sector switch
+      {
+        "senior" => query.Where(p => p.IsSeniorCitizen == true),
+        "pwd" => query.Where(p => p.IsPwd == true),
+        "4ps" => query.Where(p => p.Is4P == true),
+        _ => query.Where(p => p.IsSoloParent == true),
+      };
     }
 
     var total = await query.CountAsync();

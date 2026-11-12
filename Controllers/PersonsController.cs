@@ -11,9 +11,10 @@ namespace Claims.API.Controllers;
 public class PersonsController(PersonService persons, ICurrentUser currentUser) : ControllerBase
 {
   [HttpGet]
-  public async Task<ActionResult<PagedResult<PersonListItemDto>>> Search(
-    string? search, int page = 1, int pageSize = 20) =>
-    await persons.SearchAsync(search, page, pageSize);
+  public async Task<ActionResult<PagedResult<PersonListItemDto>>> Search([FromQuery] PersonSearchDto filter) =>
+    await persons.SearchAsync(filter) is { } result
+      ? result
+      : BadRequest(new { message = $"Sector must be one of: {string.Join(", ", PersonService.Sectors)}." });
 
   [HttpGet("{id:int}")]
   public async Task<ActionResult<PersonDto>> Get(int id)

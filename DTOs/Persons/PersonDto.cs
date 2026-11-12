@@ -41,6 +41,21 @@ public record FamilyMemberDto(
   short? RelationshipStatusId,
   string? Relationship);
 
+// Search filters; all are optional and combine with each other and with the search text.
+public class PersonSearchDto
+{
+  public string? Search { get; set; }
+  public int? CityMunicipalityId { get; set; }
+  public int? BarangayId { get; set; }
+  public short? SexId { get; set; }
+
+  // senior, pwd, 4ps, solo-parent; a person must have all of the ones given.
+  public List<string>? Sector { get; set; }
+
+  public int Page { get; set; } = 1;
+  public int PageSize { get; set; } = 20;
+}
+
 public record PersonListItemDto(
   int PersonId,
   string? FirstName,

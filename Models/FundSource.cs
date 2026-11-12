@@ -22,13 +22,19 @@ public partial class FundSource
     [Column("SourceID")]
     public short? SourceId { get; set; }
 
-    [StringLength(10)]
-    public string? DateEn { get; set; }
-
-    [StringLength(10)]
-    public string? Stat { get; set; }
-
     public short? Year { get; set; }
+
+    public bool Status { get; set; }
+
+    public int? CreatedBy { get; set; }
+
+    [Column(TypeName = "datetime")]
+    public DateTime DateCreated { get; set; }
+
+    public int? LastUpdatedBy { get; set; }
+
+    [Column(TypeName = "datetime")]
+    public DateTime? DateLastUpdated { get; set; }
 
     [ForeignKey("SourceId")]
     [InverseProperty("FundSources")]

@@ -7,35 +7,46 @@ namespace Claims.API.Controllers;
 
 [Route("api/auth")]
 [ApiController]
-public class AuthController : ControllerBase
+public class AuthController(AuthService auth, ICurrentUser currentUser) : ControllerBase
 {
-  private readonly AuthService _auth;
-
-  public AuthController(AuthService auth)
-  {
-    _auth = auth;
-  }
-
   [HttpPost("login")]
   [AllowAnonymous]
   public async Task<ActionResult<LoginResponseDto>> Login([FromBody] LoginRequestDto request)
   {
-    var result = await _auth.LoginAsync(request.Username, request.Password);
+    var result = await auth.LoginAsync(request.Username, request.Password);
 
     return result.Outcome switch
     {
       LoginOutcome.Success => Ok(result.Response),
       LoginOutcome.InvalidRequest => BadRequest(new { message = "Username and password are required." }),
-      LoginOutcome.LockedOut => Unauthorized(new { message = "Too many failed attempts. Try again later.", code = "locked_out" }),
-      _ => Unauthorized(new { message = "Invalid username or password." }),
+      LoginOutcome.LockedOut => Unauthorized(new { message = LockedMessage(result.RetryAfter), code = "locked_out" }),
+      _ => Unauthorized(new { message = InvalidCredentialsMessage(result.AttemptsLeft) }),
     };
   }
+
+  private const int WarnWhenAttemptsLeft = 3;
+
+  private static string InvalidCredentialsMessage(int attemptsLeft)
+  {
+    if (attemptsLeft > WarnWhenAttemptsLeft)
+      return "Invalid username or password.";
+
+    var minutes = Minutes(AuthService.LockoutDuration);
+    return $"Invalid username or password. {Plural(attemptsLeft, "attempt")} left before the account is locked for {Plural(minutes, "minute")}.";
+  }
+
+  private static string LockedMessage(TimeSpan retryAfter) =>
+    $"Too many failed attempts. Try again in {Plural(Minutes(retryAfter), "minute")}.";
+
+  private static int Minutes(TimeSpan t) => Math.Max(1, (int)Math.Ceiling(t.TotalMinutes));
+
+  private static string Plural(int n, string word) => n == 1 ? $"1 {word}" : $"{n} {word}s";
 
   [HttpGet("me")]
   [Authorize(Policy = AuthPolicies.AllowPendingPasswordChange)]
   public async Task<ActionResult<CurrentUserDto>> Me()
   {
-    var current = await _auth.GetCurrentUserAsync(User.GetUserId());
+    var current = await currentUser.GetProfileAsync();
     return current is null ? Unauthorized() : Ok(current);
   }
 
@@ -43,7 +54,7 @@ public class AuthController : ControllerBase
   [Authorize(Policy = AuthPolicies.AllowPendingPasswordChange)]
   public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequestDto request)
   {
-    var result = await _auth.ChangePasswordAsync(User.GetUserId(), request.CurrentPassword, request.NewPassword);
+    var result = await auth.ChangePasswordAsync(currentUser.Id, request.CurrentPassword, request.NewPassword);
 
     return result.Outcome switch
     {

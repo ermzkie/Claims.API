@@ -13,10 +13,11 @@ namespace Claims.API.Controllers;
 public class NatureOfServiceController : ControllerBase
 {
   private readonly ApplicationDbContext _context;
-
-  public NatureOfServiceController(ApplicationDbContext context)
+  private readonly ICurrentUser _currentUser;
+  public NatureOfServiceController(ApplicationDbContext context, ICurrentUser currentUser)
   {
     _context = context;
+    _currentUser = currentUser;
   }
 
   // GET: api/NatureOfService
@@ -71,7 +72,9 @@ public class NatureOfServiceController : ControllerBase
 
     var record = new NatureOfService
     {
-      NatureDesc = dto.NatureDesc.Trim()
+      NatureDesc = dto.NatureDesc.Trim(),
+      CreatedBy = _currentUser.Id,
+      DateCreated = DateTime.UtcNow.AddHours(8)
     };
 
     _context.NatureOfServices.Add(record);
@@ -119,6 +122,9 @@ public class NatureOfServiceController : ControllerBase
 
     // Update only the permitted property.
     record.NatureDesc = dto.NatureDesc.Trim();
+    record.Status = dto.Status;
+    record.LastUpdatedBy = _currentUser.Id;
+    record.DateLastUpdated = DateTime.UtcNow.AddHours(8);
 
     await _context.SaveChangesAsync();
 

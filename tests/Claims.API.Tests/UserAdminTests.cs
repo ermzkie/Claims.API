@@ -1,3 +1,4 @@
+using Claims.API.Auth;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -157,6 +158,46 @@ public class UserAdminTests
     Assert.Equal(HttpStatusCode.Forbidden, replace.StatusCode);
   }
 
+  [Fact]
+  public async Task SuperAdmin_CannotCreateSuperAdministrator()
+  {
+    await using var app = await SeedAsync();
+    var sa = await LoginAsAsync(app, "sa", Pw);
+
+    var response = await sa.PostAsJsonAsync("/api/users", NewUser("x6", [1, 3]));
+
+    Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    Assert.Equal("The Super Administrator role can't be given from the app.",
+      (await ReadJsonAsync(response)).GetProperty("message").GetString());
+    await using var db = app.CreateDbContext();
+    Assert.False(await db.Users.AnyAsync(u => u.Username == "x6"));
+  }
+
+  [Fact]
+  public async Task SuperAdmin_CannotGiveSuperAdministratorToExistingUser()
+  {
+    await using var app = await SeedAsync();
+    var sa = await LoginAsAsync(app, "sa", Pw);
+
+    var response = await sa.PutAsJsonAsync($"/api/users/{await IdOf(app, "admin2")}/roles", new { roleIds = new[] { 1, 2 } });
+
+    Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    Assert.Equal("The Super Administrator role can't be given from the app.",
+      (await ReadJsonAsync(response)).GetProperty("message").GetString());
+  }
+
+  [Fact]
+  public async Task SuperAdmin_CanChangeRolesOfAnotherSuperAdministrator_KeepingTheRole()
+  {
+    await using var app = await SeedAsync();
+    await CreateUserAsync(app, "sa2", Pw, "Super Administrator");
+    var sa = await LoginAsAsync(app, "sa", Pw);
+
+    var response = await sa.PutAsJsonAsync($"/api/users/{await IdOf(app, "sa2")}/roles", new { roleIds = new[] { 1, 2 } });
+
+    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+  }
+
   private static async Task AssertAllForbiddenAsync(HttpClient client, int targetId)
   {
     var reset = await client.PostAsJsonAsync($"/api/users/{targetId}/reset-password", new { temporaryPassword = Temp });
@@ -251,7 +292,7 @@ public class UserAdminTests
     await using var app = await SeedAsync();
     var admin = await LoginAsAsync(app, "admin", Pw);
     var anon = app.CreateClient();
-    for (var i = 0; i < 5; i++)
+    for (var i = 0; i < AuthService.MaxFailedAttempts; i++)
     {
       await anon.PostAsJsonAsync("/api/auth/login", new { username = "sw", password = "wrong-password" });
     }

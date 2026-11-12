@@ -65,6 +65,10 @@ public partial class UserAdminService
     {
       return Forbidden();
     }
+    if (IncludesSuperAdministrator(roles))
+    {
+      return SuperAdministratorNotGrantable();
+    }
 
     var username = dto.Username?.Trim() ?? string.Empty;
     if (username.Length == 0 || username.Length > MaxNameLength || !UsernamePattern().IsMatch(username))
@@ -187,6 +191,10 @@ public partial class UserAdminService
     if ((HoldsPrivilegedRole(target) || GrantsPrivilegedRole(roles)) && !await IsSuperAdministratorAsync(actorId))
     {
       return Forbidden();
+    }
+    if (IncludesSuperAdministrator(roles) && !HoldsSuperAdministratorRole(target))
+    {
+      return SuperAdministratorNotGrantable();
     }
 
     var roleError = ValidateRoleIds(roleIds, roles);
@@ -380,6 +388,13 @@ public partial class UserAdminService
 
   private static AdminResult NotFound() => new(AdminOutcome.NotFound, "User not found.");
   private static AdminResult Forbidden() => new(AdminOutcome.Forbidden, "You are not allowed to perform this action.");
+
+  // New Super Administrators are only set up directly in the database.
+  private static AdminResult SuperAdministratorNotGrantable() =>
+    new(AdminOutcome.Forbidden, "The Super Administrator role can't be given from the app.");
+
+  private static bool IncludesSuperAdministrator(IEnumerable<Role> roles) =>
+    roles.Any(r => r.RoleName == RoleNames.SuperAdministrator);
   private static AdminResult Invalid(string message) => new(AdminOutcome.Invalid, message);
   private static AdminResult Conflict(string message) => new(AdminOutcome.Conflict, message);
 }

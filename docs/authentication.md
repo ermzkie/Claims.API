@@ -35,10 +35,15 @@ for plaintext. Passwords are stored as ASP.NET Core Identity hashes (PBKDF2).
 ## Login
 
 - Wrong username, wrong password and deactivated account all return the same 401.
-- 5 wrong passwords in a row locks the account for 15 minutes. A locked account gets
-  "Too many failed attempts. Try again later."
+- 10 wrong passwords in a row locks the account for 5 minutes.
+- From the 7th wrong try the message warns: "Invalid username or password. 3 attempts left
+  before the account is locked for 5 minutes." A locked account gets "Too many failed
+  attempts. Try again in N minutes."
+- Unknown usernames and deactivated accounts get exactly the same messages, countdown and
+  lockout, so the login page never reveals which usernames exist. Unknown usernames are
+  counted in memory (up to 100,000 names, reset when the API restarts).
 - Lockout doesn't kick out sessions the user already has, otherwise anyone could
-  log someone out by typing their username wrong 5 times.
+  log someone out by typing their username wrong 10 times.
 
 ## Temporary passwords
 
@@ -69,6 +74,8 @@ Rules:
 - You can't deactivate yourself, change your own roles or reset your own password
   (use change-password).
 - The API refuses anything that would leave no active Super Administrator.
+- Nobody can give the Super Administrator role from the app, not even a Super Administrator.
+  New Super Administrators are set up directly in the database. Existing ones keep the role.
 - No delete. Other tables reference `UserID`, so accounts are deactivated instead.
 
 ## Other endpoints

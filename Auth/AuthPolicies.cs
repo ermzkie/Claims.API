@@ -21,6 +21,9 @@ public static class AuthPolicies
 
     services.AddSingleton<TokenService>();
     services.AddScoped<AuthService>();
+    services.AddSingleton<UnknownUsernameAttempts>();
+    services.AddHttpContextAccessor();
+    services.AddScoped<ICurrentUser, CurrentUser>();
 
     services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
       .AddJwtBearer();

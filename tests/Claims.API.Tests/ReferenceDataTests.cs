@@ -8,7 +8,7 @@ using static Claims.API.Tests.Infrastructure.TestData;
 
 namespace Claims.API.Tests;
 
-public class ListsTests
+public class ReferenceDataTests
 {
   private const string Pw = "Str0ng-Passw0rd!x";
 
@@ -45,9 +45,9 @@ public class ListsTests
     await using (app)
     {
       var frontliner = await LoginAsAsync(app, "fl", Pw);
-      Assert.Equal(HttpStatusCode.Forbidden, (await frontliner.GetAsync("/api/lists")).StatusCode);
+      Assert.Equal(HttpStatusCode.Forbidden, (await frontliner.GetAsync("/api/reference-data")).StatusCode);
       Assert.Equal(HttpStatusCode.Forbidden,
-        (await frontliner.PostAsJsonAsync("/api/lists/civil-statuses", new { name = "X" })).StatusCode);
+        (await frontliner.PostAsJsonAsync("/api/reference-data/civil-statuses", new { name = "X" })).StatusCode);
     }
   }
 
@@ -57,7 +57,7 @@ public class ListsTests
     var (app, admin) = await StartAsync();
     await using (app)
     {
-      using var doc = JsonDocument.Parse(await admin.GetStringAsync("/api/lists"));
+      using var doc = JsonDocument.Parse(await admin.GetStringAsync("/api/reference-data"));
       var keys = doc.RootElement.EnumerateArray().Select(e => e.GetProperty("key").GetString()).ToList();
 
       Assert.Equal(
@@ -80,10 +80,10 @@ public class ListsTests
         await db.SaveChangesAsync();
       }
 
-      var items = await admin.GetFromJsonAsync<List<Item>>("/api/lists/civil-statuses");
+      var items = await admin.GetFromJsonAsync<List<Item>>("/api/reference-data/civil-statuses");
 
       Assert.Equal([new Item(1, "S", "Single", 0), new Item(2, "M", "Married", 2)], items);
-      Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync("/api/lists/nope")).StatusCode);
+      Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync("/api/reference-data/nope")).StatusCode);
     }
   }
 
@@ -93,7 +93,7 @@ public class ListsTests
     var (app, admin) = await StartAsync();
     await using (app)
     {
-      var response = await admin.PostAsJsonAsync("/api/lists/civil-statuses", new { code = " W ", name = " Widowed " });
+      var response = await admin.PostAsJsonAsync("/api/reference-data/civil-statuses", new { code = " W ", name = " Widowed " });
 
       Assert.Equal(HttpStatusCode.Created, response.StatusCode);
       Assert.Equal(new Item(3, "W", "Widowed", 0), await response.Content.ReadFromJsonAsync<Item>());
@@ -108,8 +108,8 @@ public class ListsTests
     var (app, admin) = await StartAsync();
     await using (app)
     {
-      var relationship = await admin.PostAsJsonAsync("/api/lists/relationships", new { name = "Spouse" });
-      var suffix = await admin.PostAsJsonAsync("/api/lists/name-suffixes", new { name = "Sr." });
+      var relationship = await admin.PostAsJsonAsync("/api/reference-data/relationships", new { name = "Spouse" });
+      var suffix = await admin.PostAsJsonAsync("/api/reference-data/name-suffixes", new { name = "Sr." });
 
       Assert.Equal(new Item(1, null, "Spouse", 0), await relationship.Content.ReadFromJsonAsync<Item>());
       Assert.Equal(new Item(2, null, "Sr.", 0), await suffix.Content.ReadFromJsonAsync<Item>());
@@ -122,7 +122,7 @@ public class ListsTests
     var (app, admin) = await StartAsync();
     await using (app)
     {
-      var response = await admin.PostAsJsonAsync("/api/lists/modes-of-assistance", new { name = "Guarantee Letter" });
+      var response = await admin.PostAsJsonAsync("/api/reference-data/modes-of-assistance", new { name = "Guarantee Letter" });
 
       var item = await response.Content.ReadFromJsonAsync<Item>();
       Assert.Equal("Guarantee Letter", item!.Name);
@@ -138,7 +138,7 @@ public class ListsTests
     var (app, admin) = await StartAsync();
     await using (app)
     {
-      var response = await admin.PostAsJsonAsync("/api/lists/civil-statuses", new { name });
+      var response = await admin.PostAsJsonAsync("/api/reference-data/civil-statuses", new { name });
 
       Assert.Equal(name == "" ? HttpStatusCode.BadRequest : HttpStatusCode.Conflict, response.StatusCode);
       Assert.Equal(message, await Message(response));
@@ -151,7 +151,7 @@ public class ListsTests
     var (app, admin) = await StartAsync();
     await using (app)
     {
-      var response = await admin.PostAsJsonAsync("/api/lists/civil-statuses", new { name = new string('x', 51) });
+      var response = await admin.PostAsJsonAsync("/api/reference-data/civil-statuses", new { name = new string('x', 51) });
 
       Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
       Assert.Equal("Name can be at most 50 characters.", await Message(response));
@@ -170,9 +170,9 @@ public class ListsTests
         await db.SaveChangesAsync();
       }
 
-      var renamed = await admin.PutAsJsonAsync("/api/lists/civil-statuses/2", new { code = "M", name = "Married (civil)" });
-      var duplicate = await admin.PutAsJsonAsync("/api/lists/civil-statuses/2", new { name = "SINGLE" });
-      var missing = await admin.PutAsJsonAsync("/api/lists/civil-statuses/99", new { name = "X" });
+      var renamed = await admin.PutAsJsonAsync("/api/reference-data/civil-statuses/2", new { code = "M", name = "Married (civil)" });
+      var duplicate = await admin.PutAsJsonAsync("/api/reference-data/civil-statuses/2", new { name = "SINGLE" });
+      var missing = await admin.PutAsJsonAsync("/api/reference-data/civil-statuses/99", new { name = "X" });
 
       Assert.Equal(new Item(2, "M", "Married (civil)", 1), await renamed.Content.ReadFromJsonAsync<Item>());
       Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
@@ -194,8 +194,8 @@ public class ListsTests
         await db.SaveChangesAsync();
       }
 
-      var inUse = await admin.DeleteAsync("/api/lists/name-suffixes/1");
-      var unused = await admin.DeleteAsync("/api/lists/civil-statuses/1");
+      var inUse = await admin.DeleteAsync("/api/reference-data/name-suffixes/1");
+      var unused = await admin.DeleteAsync("/api/reference-data/civil-statuses/1");
 
       Assert.Equal(HttpStatusCode.Conflict, inUse.StatusCode);
       Assert.Equal("Can't delete \"Jr.\": 1 record uses it. You can rename it instead.", await Message(inUse));
@@ -218,7 +218,7 @@ public class ListsTests
         await db.SaveChangesAsync();
       }
 
-      var items = await admin.GetFromJsonAsync<List<Item>>("/api/lists/name-suffixes");
+      var items = await admin.GetFromJsonAsync<List<Item>>("/api/reference-data/name-suffixes");
 
       Assert.Equal(2, items!.Single().UsedBy);
     }

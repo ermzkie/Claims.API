@@ -1,4 +1,4 @@
-namespace Claims.API.DTOs.Lists;
+namespace Claims.API.DTOs.ReferenceData;
 
 public record ListInfoDto(string Key, string Title, bool HasCode);
 

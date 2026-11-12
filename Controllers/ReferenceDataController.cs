@@ -1,16 +1,16 @@
 using Claims.API.Auth;
-using Claims.API.DTOs.Lists;
+using Claims.API.DTOs.ReferenceData;
 using Claims.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Claims.API.Controllers;
 
-// Admin maintenance of the small lookup lists. The dropdowns read them through /api/lookups.
-[Route("api/lists")]
+// Admin maintenance of the reference data (small lookup lists). The dropdowns read it through /api/lookups.
+[Route("api/reference-data")]
 [ApiController]
 [Authorize(Policy = AuthPolicies.UserAdmin)]
-public class ListsController(ListsService lists) : ControllerBase
+public class ReferenceDataController(ReferenceDataService lists) : ControllerBase
 {
   [HttpGet]
   public IReadOnlyList<ListInfoDto> Index() => lists.Index();

@@ -1,5 +1,5 @@
 using Claims.API.Data;
-using Claims.API.DTOs.Lists;
+using Claims.API.DTOs.ReferenceData;
 using Claims.API.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -15,9 +15,9 @@ public enum ListOutcome
 
 public record ListResult(ListOutcome Outcome, string? Message = null, ListItemDto? Item = null);
 
-// The small lookup lists admins maintain from File Maintenance. None of these tables has a status
+// The reference data admins maintain from File Maintenance > Reference Data. None of these tables has a status
 // column, so a value can't be hidden: it can be renamed, or deleted while nothing uses it.
-public class ListsService(ApplicationDbContext db)
+public class ReferenceDataService(ApplicationDbContext db)
 {
   private const int MaxText = 50;
 

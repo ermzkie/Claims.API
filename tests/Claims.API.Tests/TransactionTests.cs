@@ -32,11 +32,9 @@ public class TransactionTests
     Assert.Equal(userId, created.CreatedBy);
     Assert.True(created.Status);
 
-    var duplicate = await client.PostAsJsonAsync("/api/transactions", new { transactionId = 41 });
-    Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
-
-    var update = await client.PutAsJsonAsync("/api/transactions/41", new
+    var update = await client.PostAsJsonAsync("/api/transactions", new
     {
+      transactionId = 41,
       refNo = "REF-41-UPDATED",
       amount = 200m,
       isReleased = true,

@@ -45,7 +45,8 @@ public class PersonService(ApplicationDbContext db, TimeProvider time)
       .Skip((page - 1) * pageSize)
       .Take(pageSize)
       .Select(p => new PersonListItemDto(
-        p.PersonId, p.FirstName, p.MiddleName, p.LastName, p.Gender, p.Barangay, p.Municipality, p.Birthdate))
+        p.PersonId, p.FirstName, p.MiddleName, p.LastName, p.Gender, p.Barangay, p.Municipality, p.Birthdate,
+        p.IsSeniorCitizen == true, p.IsSoloParent == true, p.IsPwd == true, p.Is4P == true))
       .ToListAsync();
 
     return new PagedResult<PersonListItemDto>(items, total, page, pageSize);

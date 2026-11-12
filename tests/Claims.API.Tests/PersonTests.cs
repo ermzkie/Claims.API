@@ -201,7 +201,19 @@ public class PersonTests
       await SeedLegacyAsync(app, "Pedro", "Dela Cruz");
       await SeedLegacyAsync(app, "Maria", "Santos");
 
+      await using (var db = app.CreateDbContext())
+      {
+        var juan = await db.People.SingleAsync(p => p.FirstName == "Juan");
+        juan.IsSeniorCitizen = true;
+        juan.Is4P = true;
+        await db.SaveChangesAsync();
+      }
+
       var both = await Json(await client.GetAsync("/api/persons?search=cruz juan"));
+      var juanItem = both.GetProperty("items").EnumerateArray().Single(i => i.GetProperty("firstName").GetString() == "Juan");
+      Assert.True(juanItem.GetProperty("isSeniorCitizen").GetBoolean());
+      Assert.True(juanItem.GetProperty("is4P").GetBoolean());
+      Assert.False(juanItem.GetProperty("isPwd").GetBoolean());
       var comma = await Json(await client.GetAsync("/api/persons?search=Dela Cruz, Pedro"));
       var paged = await Json(await client.GetAsync("/api/persons?search=cruz&page=2&pageSize=2"));
 

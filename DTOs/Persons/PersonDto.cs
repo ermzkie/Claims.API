@@ -49,4 +49,8 @@ public record PersonListItemDto(
   string? Sex,
   string? Barangay,
   string? Municipality,
-  DateOnly? Birthdate);
+  DateOnly? Birthdate,
+  bool IsSeniorCitizen,
+  bool IsSoloParent,
+  bool IsPwd,
+  bool Is4P);

@@ -27,4 +27,5 @@ public class SaveTransactionDto
   public string? SocialWorkerAssessment { get; set; }
   public string? Remarks { get; set; }
   public bool? IsReleased { get; set; }
+  public List<short>? NatureIds { get; set; }
 }

@@ -121,6 +121,63 @@ public class PersonTests
     }
   }
 
+  [Theory]
+  [InlineData("lastName", "DELA CRUZ 2", "Names can only contain")]
+  [InlineData("firstName", "JUAN@", "Names can only contain")]
+  [InlineData("middleName", "1", "Names can only contain")]
+  [InlineData("contactNo", "0917abc4567", "Contact no. can only contain")]
+  [InlineData("contactNo", "12345", "Contact no. can only contain")]
+  [InlineData("contactNo", "0917 123 4567 8901 2", "Contact no. can only contain")]
+  [InlineData("birthdate", "1899-12-31", "Birthdate can't be before 1900.")]
+  [InlineData("estimatedMonthlyIncome", 100000000, "Estimated monthly income is too large.")]
+  [InlineData("estimatedMonthlyIncome", 10.555, "Estimated monthly income can have at most 2 decimal places.")]
+  public async Task Create_RejectsBadValues(string field, object value, string message)
+  {
+    var (app, client, _) = await StartAsync();
+    await using (app)
+    {
+      var body = new Dictionary<string, object?> { ["firstName"] = "JUAN", ["lastName"] = "DELA CRUZ", [field] = value };
+
+      var response = await client.PostAsJsonAsync("/api/persons", body);
+
+      Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+      Assert.StartsWith(message, (await Json(response)).GetProperty("message").GetString());
+    }
+  }
+
+  [Theory]
+  [InlineData("O'BRIEN", "MA. CRISTINA", "DE LA PEÑA-REYES", "+63 (917) 123-4567")]
+  [InlineData("ÑONO", "JOSÉ", "SANTOS", "09171234567")]
+  public async Task Create_AcceptsRealisticValues(string last, string first, string middle, string contact)
+  {
+    var (app, client, _) = await StartAsync();
+    await using (app)
+    {
+      var response = await client.PostAsJsonAsync("/api/persons",
+        new { lastName = last, firstName = first, middleName = middle, contactNo = contact, estimatedMonthlyIncome = 12500.50m });
+
+      Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+  }
+
+  [Fact]
+  public async Task Update_OldNameWithComma_CanStillBeEdited_ButNotChangedToBadName()
+  {
+    var (app, client, _) = await StartAsync();
+    await using (app)
+    {
+      var id = await SeedLegacyAsync(app, "JUAN", "SANTOS, JR.");
+
+      var keepName = await client.PutAsJsonAsync($"/api/persons/{id}",
+        new { firstName = "JUAN", lastName = "SANTOS, JR.", contactNo = "09171234567" });
+      var badName = await client.PutAsJsonAsync($"/api/persons/{id}",
+        new { firstName = "JUAN", lastName = "SANTOS / JR" });
+
+      Assert.Equal(HttpStatusCode.OK, keepName.StatusCode);
+      Assert.Equal(HttpStatusCode.BadRequest, badName.StatusCode);
+    }
+  }
+
   [Fact]
   public async Task Create_RejectsUnknownLookupIds()
   {

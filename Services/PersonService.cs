@@ -2,6 +2,7 @@ using Claims.API.Data;
 using Claims.API.DTOs.Common;
 using Claims.API.DTOs.Persons;
 using Claims.API.Models;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 
 namespace Claims.API.Services;
@@ -15,11 +16,20 @@ public enum PersonOutcome
 
 public record PersonResult(PersonOutcome Outcome, string? Message = null, PersonDto? Person = null);
 
-public class PersonService(ApplicationDbContext db, TimeProvider time)
+public partial class PersonService(ApplicationDbContext db, TimeProvider time)
 {
   private const int MaxText = 50;
   private const int DefaultPageSize = 20;
   private const int MaxPageSize = 100;
+  private const decimal MaxIncome = 99_999_999.99m;
+  private static readonly DateOnly EarliestBirthdate = new(1900, 1, 1);
+
+  // Letters (any language, including ñ and accents), spaces, periods, apostrophes and hyphens.
+  [GeneratedRegex(@"^[\p{L}\p{M}][\p{L}\p{M} .'\-]*$")]
+  private static partial Regex NamePattern();
+
+  [GeneratedRegex(@"^[0-9 +()\-]+$")]
+  private static partial Regex ContactPattern();
 
   public async Task<PagedResult<PersonListItemDto>> SearchAsync(string? search, int page, int pageSize)
   {
@@ -134,19 +144,52 @@ public class PersonService(ApplicationDbContext db, TimeProvider time)
       return "Last name is required.";
     }
 
+    var middleName = Name(dto.MiddleName);
+
     string?[] texts =
-      [firstName, dto.MiddleName, lastName, dto.NoBuildingName, dto.Street, dto.PurokSubdivision, dto.ContactNo, dto.SkillOccupation];
+      [firstName, middleName, lastName, dto.NoBuildingName, dto.Street, dto.PurokSubdivision, dto.ContactNo, dto.SkillOccupation];
     if (texts.Any(t => Clean(t)?.Length > MaxText))
     {
       return $"Text fields can be at most {MaxText} characters.";
     }
+
+    // Old records can hold other characters (commas, slashes); only typed or changed names are checked.
+    (string? Value, string? Stored)[] names =
+      [(lastName, person.LastName), (firstName, person.FirstName), (middleName, person.MiddleName)];
+    if (names.Any(n => n.Value is not null && n.Value != n.Stored && !NamePattern().IsMatch(n.Value)))
+    {
+      return "Names can only contain letters, spaces, periods (.), apostrophes (') and hyphens (-).";
+    }
+
+    var contactNo = Clean(dto.ContactNo);
+    if (contactNo is not null)
+    {
+      var digits = contactNo.Count(char.IsAsciiDigit);
+      if (!ContactPattern().IsMatch(contactNo) || digits < 7 || digits > 15)
+      {
+        return "Contact no. can only contain numbers, spaces, +, - and ( ), with 7 to 15 digits.";
+      }
+    }
+
     if (dto.Birthdate > DateOnly.FromDateTime(Now()))
     {
       return "Birthdate can't be in the future.";
     }
+    if (dto.Birthdate < EarliestBirthdate)
+    {
+      return "Birthdate can't be before 1900.";
+    }
     if (dto.EstimatedMonthlyIncome < 0)
     {
       return "Estimated monthly income can't be negative.";
+    }
+    if (dto.EstimatedMonthlyIncome > MaxIncome)
+    {
+      return "Estimated monthly income is too large.";
+    }
+    if (dto.EstimatedMonthlyIncome is { } income && decimal.Round(income, 2) != income)
+    {
+      return "Estimated monthly income can have at most 2 decimal places.";
     }
 
     Sex? sex = null;
@@ -175,7 +218,7 @@ public class PersonService(ApplicationDbContext db, TimeProvider time)
     }
 
     person.FirstName = firstName;
-    person.MiddleName = Name(dto.MiddleName);
+    person.MiddleName = middleName;
     person.LastName = lastName;
     person.NameSuffixId = dto.NameSuffixId;
     person.CivilStatusId = dto.CivilStatusId;
@@ -188,7 +231,7 @@ public class PersonService(ApplicationDbContext db, TimeProvider time)
     person.IsRr = dto.IsRr;
     person.Is4P = dto.Is4P;
     person.Birthdate = dto.Birthdate;
-    person.ContactNo = Clean(dto.ContactNo);
+    person.ContactNo = contactNo;
     person.SkillOccupation = Clean(dto.SkillOccupation);
     person.EstimatedMonthlyIncome = dto.EstimatedMonthlyIncome;
 

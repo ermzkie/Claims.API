@@ -126,7 +126,6 @@ public partial class ApplicationDbContext : DbContext
         {
             entity.HasKey(e => e.PersonId).HasName("PK_Patients");
 
-            entity.Property(e => e.PersonId).ValueGeneratedNever();
             entity.Property(e => e.DateCreated).HasDefaultValueSql("(getdate())", "DF_Person_DateCreated");
             entity.Property(e => e.Status).HasDefaultValue(true, "DF_Patient_PatientStatus");
 

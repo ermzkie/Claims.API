@@ -7,7 +7,7 @@ namespace Claims.API.Tests;
 public class ModelTests
 {
   [Fact]
-  public async Task User_PasswordHash_MapsToPasswordColumn_AndNewColumnsRoundTrip()
+  public async Task User_PasswordHash_IsStoredInPasswordColumn_AndNewColumnsRoundTrip()
   {
     await using var app = new ClaimsApiFactory();
     int id;
@@ -16,7 +16,7 @@ public class ModelTests
       var user = new User
       {
         Username = "a",
-        PasswordHash = new string('x', 84),
+        Password = new string('x', 84),
         MustChangePassword = true,
         FailedLoginCount = 2,
         LockoutEnd = app.Clock.GetLocalNow().DateTime.AddHours(1)
@@ -28,11 +28,11 @@ public class ModelTests
 
     await using var db2 = app.CreateDbContext();
     var u = await db2.Users.SingleAsync(x => x.UserId == id);
-    Assert.Equal(84, u.PasswordHash.Length);
+    Assert.Equal(84, u.Password.Length);
     Assert.True(u.MustChangePassword);
     Assert.Equal(2, u.FailedLoginCount);
     Assert.NotNull(u.LockoutEnd);
-    Assert.Equal("Password", db2.Model.FindEntityType(typeof(User))!.FindProperty(nameof(User.PasswordHash))!.GetColumnName());
+    Assert.Equal("Password", db2.Model.FindEntityType(typeof(User))!.FindProperty(nameof(User.Password))!.GetColumnName());
   }
 
   [Fact]
@@ -40,8 +40,8 @@ public class ModelTests
   {
     await using var app = new ClaimsApiFactory();
     await using var db = app.CreateDbContext();
-    db.Users.Add(new User { Username = "dup", PasswordHash = "h" });
-    db.Users.Add(new User { Username = "dup", PasswordHash = "h" });
+    db.Users.Add(new User { Username = "dup", Password = "h" });
+    db.Users.Add(new User { Username = "dup", Password = "h" });
     await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
   }
 }

@@ -64,7 +64,7 @@ public static class TestData
       MustChangePassword = mustChangePassword,
       Status = active,
     };
-    user.PasswordHash = PasswordHashing.Hasher.HashPassword(user, password);
+    user.Password = PasswordHashing.Hasher.HashPassword(user, password);
 
     foreach (var role in roles)
     {

@@ -23,4 +23,5 @@ public class TransactionResponseDto
   public int? LastUpdatedBy { get; set; }
   public DateTime? DateLastUpdated { get; set; }
   public int? SocialWorkerUserId { get; set; }
+  public List<short> NatureIds { get; set; } = [];
 }

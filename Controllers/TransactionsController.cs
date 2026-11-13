@@ -101,6 +101,7 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
 
     // 4. Pagination
     var transactions = await orderedQuery
+        .Include(x => x.TransactionServices)
         .Skip((parameters.Page - 1) * pageSize)
         .Take(pageSize)
         .ToListAsync();
@@ -125,6 +126,7 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
   {
     var transaction = await context.Transactions
       .AsNoTracking()
+      .Include(x => x.TransactionServices)
       .Where(x => x.TransactionId == id)
       .FirstOrDefaultAsync();
 
@@ -138,7 +140,9 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
   {
     var now = DateTime.UtcNow.AddHours(8);
     var transaction = dto.TransactionId.HasValue
-      ? await context.Transactions.FirstOrDefaultAsync(x => x.TransactionId == dto.TransactionId.Value)
+      ? await context.Transactions
+        .Include(x => x.TransactionServices)
+        .FirstOrDefaultAsync(x => x.TransactionId == dto.TransactionId.Value)
       : null;
     var isNew = transaction is null;
 
@@ -175,7 +179,35 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
     transaction.SocialWorkerAssessment = dto.SocialWorkerAssessment;
     transaction.Remarks = dto.Remarks;
 
-    await context.SaveChangesAsync();
+    if (dto.NatureIds is null)
+    {
+      await context.SaveChangesAsync();
+    }
+    else
+    {
+      await using var dbTransaction = await context.Database.BeginTransactionAsync();
+      await context.SaveChangesAsync();
+
+      var natureIds = dto.NatureIds.Distinct().ToHashSet();
+      foreach (var service in transaction.TransactionServices.ToList())
+      {
+        if (service.NatureId.HasValue && natureIds.Remove(service.NatureId.Value))
+          continue;
+
+        context.TransactionServices.Remove(service);
+      }
+
+      foreach (var natureId in natureIds)
+      {
+        transaction.TransactionServices.Add(new TransactionService
+        {
+          NatureId = natureId,
+        });
+      }
+
+      await context.SaveChangesAsync();
+      await dbTransaction.CommitAsync();
+    }
 
     return isNew
       ? CreatedAtAction(nameof(GetById), new { id = transaction.TransactionId }, ToResponse(transaction))
@@ -221,5 +253,9 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
     LastUpdatedBy = transaction.LastUpdatedBy,
     DateLastUpdated = transaction.DateLastUpdated,
     SocialWorkerUserId = transaction.SocialWorkerUserId,
+    NatureIds = transaction.TransactionServices
+      .Where(service => service.NatureId.HasValue)
+      .Select(service => service.NatureId!.Value)
+      .ToList(),
   };
 }

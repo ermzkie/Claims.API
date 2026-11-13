@@ -21,11 +21,6 @@ public partial class Transaction
     [Unicode(false)]
     public string? RefNo { get; set; }
 
-    [Column("SocialWorkerID")]
-    [StringLength(50)]
-    [Unicode(false)]
-    public string? SocialWorkerId { get; set; }
-
     [Column(TypeName = "datetime")]
     public DateTime? Date { get; set; }
 
@@ -50,6 +45,14 @@ public partial class Transaction
     [Column(TypeName = "decimal(18, 2)")]
     public decimal? Amount { get; set; }
 
+    [Column("SocialWorkerID")]
+    [StringLength(50)]
+    [Unicode(false)]
+    public string? SocialWorkerId { get; set; }
+
+    [Column("SocialWorkerUserID")]
+    public int? SocialWorkerUserId { get; set; }
+
     [Unicode(false)]
     public string? SocialWorkerAssessment { get; set; }
 
@@ -69,9 +72,6 @@ public partial class Transaction
 
     [Column(TypeName = "datetime")]
     public DateTime? DateLastUpdated { get; set; }
-
-    [Column("SocialWorkerUserID")]
-    public int? SocialWorkerUserId { get; set; }
 
     [ForeignKey("CreditorId")]
     [InverseProperty("Transactions")]

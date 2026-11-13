@@ -8,7 +8,9 @@ public class TransactionResponseDto
   public string? SocialWorkerId { get; set; }
   public DateTime? Date { get; set; }
   public int? PatientPersonId { get; set; }
+  public string? PatientPersonName { get; set; }
   public int? RepresentativePersonId { get; set; }
+  public string? RepresentativePersonName { get; set; }
   public string? Representative { get; set; }
   public int? FundSourceId { get; set; }
   public int? CreditorId { get; set; }

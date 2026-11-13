@@ -12,6 +12,7 @@ public partial class ApplicationDbContext : DbContext
     {
     }
 
+    public DbSet<AnnualBalanceResult> AnnualBalanceResults { get; set; }
     public virtual DbSet<Address> Addresses { get; set; }
 
     public virtual DbSet<Assistance> Assistances { get; set; }
@@ -109,8 +110,8 @@ public partial class ApplicationDbContext : DbContext
         modelBuilder.Entity<FundSource>(entity =>
         {
             entity.Property(e => e.FundSourceId).ValueGeneratedNever();
-            entity.Property(e => e.DateEn).IsFixedLength();
-            entity.Property(e => e.Stat).IsFixedLength();
+            entity.Property(e => e.DateCreated).HasDefaultValueSql("(getdate())", "DF_FundSource_DateCreated");
+            entity.Property(e => e.Status).HasDefaultValue(true, "DF_FundSource_Status");
 
             entity.HasOne(d => d.Source).WithMany(p => p.FundSources).HasConstraintName("FK_FundSource_SourceOfAssistance");
         });
@@ -180,8 +181,6 @@ public partial class ApplicationDbContext : DbContext
 
         modelBuilder.Entity<TransactionService>(entity =>
         {
-            entity.Property(e => e.TranServiceId).ValueGeneratedNever();
-
             entity.HasOne(d => d.Nature).WithMany(p => p.TransactionServices).HasConstraintName("FK_TransactionServices_NatureOfService");
 
             entity.HasOne(d => d.Transaction).WithMany(p => p.TransactionServices)
@@ -212,6 +211,8 @@ public partial class ApplicationDbContext : DbContext
         });
 
         OnModelCreatingPartial(modelBuilder);
+
+        modelBuilder.Entity<AnnualBalanceResult>().HasNoKey();
     }
 
     partial void OnModelCreatingPartial(ModelBuilder modelBuilder);

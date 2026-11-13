@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using Claims.API.DTOs.Common;
 using Claims.API.DTOs.Transactions;
 using Claims.API.Models;
 using Claims.API.Tests.Infrastructure;
@@ -113,5 +114,36 @@ public class TransactionTests
       .Select(x => x.NatureId)
       .ToListAsync();
     Assert.Equal(new short?[] { secondNatureId }, updatedNatureIds);
+  }
+
+  [Fact]
+  public async Task GetAll_IncludesLinkedPatientAndRepresentativeNames()
+  {
+    await using var app = new ClaimsApiFactory();
+    await SeedRolesAsync(app);
+    await CreateUserAsync(app, "worker", Password, "Frontliner");
+    using var client = await LoginAsAsync(app, "worker", Password);
+
+    await using (var db = app.CreateDbContext())
+    {
+      var patient = new Person { FirstName = "Maria", LastName = "Santos", Status = true };
+      var representative = new Person { FirstName = "Juan", MiddleName = "Dela", LastName = "Cruz", Status = true };
+      db.People.AddRange(patient, representative);
+      await db.SaveChangesAsync();
+      db.Transactions.Add(new Transaction
+      {
+        PatientPersonId = patient.PersonId,
+        RepresentativePersonId = representative.PersonId,
+        Status = true,
+      });
+      await db.SaveChangesAsync();
+    }
+
+    var result = await client.GetFromJsonAsync<PagedResult<TransactionResponseDto>>("/api/transactions");
+
+    Assert.NotNull(result);
+    var transaction = Assert.Single(result.Items);
+    Assert.Equal("Maria Santos", transaction.PatientPersonName);
+    Assert.Equal("Juan Dela Cruz", transaction.RepresentativePersonName);
   }
 }

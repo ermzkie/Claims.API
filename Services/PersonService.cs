@@ -15,6 +15,7 @@ public enum PersonOutcome
 }
 
 public record PersonResult(PersonOutcome Outcome, string? Message = null, PersonDto? Person = null);
+public record FamilyMemberResult(PersonOutcome Outcome, string? Message = null, FamilyMemberDto? FamilyMember = null);
 
 public partial class PersonService(ApplicationDbContext db, TimeProvider time)
 {
@@ -147,7 +148,8 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
 
   public async Task<PersonResult> CreateAsync(int actorId, SavePersonDto dto)
   {
-    var person = new Person { CreatedBy = actorId };
+    // Set explicitly: re-generating the models from the database drops the `= true` default.
+    var person = new Person { CreatedBy = actorId, Status = true };
     var error = await ApplyAsync(person, dto);
     if (error is not null)
     {
@@ -178,6 +180,85 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
     await db.SaveChangesAsync();
     return new PersonResult(PersonOutcome.Ok, Person: await GetAsync(id));
   }
+
+  public async Task<FamilyMemberResult> AddFamilyMemberAsync(int actorId, int personId, SaveFamilyMemberDto dto)
+  {
+    if (!await db.People.AnyAsync(p => p.PersonId == personId))
+    {
+      return new FamilyMemberResult(PersonOutcome.NotFound, "Person not found.");
+    }
+    var error = await ValidateFamilyMemberAsync(dto);
+    if (error is not null)
+    {
+      return new FamilyMemberResult(PersonOutcome.Invalid, error);
+    }
+
+    var familyComposition = new FamilyComposition
+    {
+      PersonId = personId,
+      FamilyPersonId = dto.FamilyPersonId,
+      RelationshipStatusId = dto.RelationshipStatusId,
+      Status = true,
+      CreatedBy = actorId,
+    };
+    db.FamilyCompositions.Add(familyComposition);
+    await db.SaveChangesAsync();
+
+    var familyMember = await FamilyMemberProjection(db.FamilyCompositions.AsNoTracking()
+      .Where(f => f.FamilyCompId == familyComposition.FamilyCompId)).SingleAsync();
+    return new FamilyMemberResult(PersonOutcome.Ok, FamilyMember: familyMember);
+  }
+
+  public async Task<FamilyMemberResult> UpdateFamilyMemberAsync(
+    int actorId, int personId, int familyCompId, SaveFamilyMemberDto dto)
+  {
+    var familyComposition = await db.FamilyCompositions.FirstOrDefaultAsync(f =>
+      f.PersonId == personId && f.FamilyCompId == familyCompId && f.Status);
+    if (familyComposition is null)
+    {
+      return new FamilyMemberResult(PersonOutcome.NotFound, "Family member not found.");
+    }
+
+    var error = await ValidateFamilyMemberAsync(dto);
+    if (error is not null)
+    {
+      return new FamilyMemberResult(PersonOutcome.Invalid, error);
+    }
+
+    familyComposition.FamilyPersonId = dto.FamilyPersonId;
+    familyComposition.RelationshipStatusId = dto.RelationshipStatusId;
+    familyComposition.LastUpdatedBy = actorId;
+    familyComposition.DateLastUpdated = Now();
+    await db.SaveChangesAsync();
+
+    var familyMember = await FamilyMemberProjection(db.FamilyCompositions.AsNoTracking()
+      .Where(f => f.FamilyCompId == familyCompId)).SingleAsync();
+    return new FamilyMemberResult(PersonOutcome.Ok, FamilyMember: familyMember);
+  }
+
+  private async Task<string?> ValidateFamilyMemberAsync(SaveFamilyMemberDto dto)
+  {
+    if (!await db.People.AnyAsync(p => p.PersonId == dto.FamilyPersonId))
+    {
+      return "Family person not found.";
+    }
+    if (dto.RelationshipStatusId is { } relationshipStatusId
+      && !await db.RelationshipStatuses.AnyAsync(r => r.RelationshipStatusId == relationshipStatusId))
+    {
+      return "Relationship status not found.";
+    }
+    return null;
+  }
+
+  private static IQueryable<FamilyMemberDto> FamilyMemberProjection(IQueryable<FamilyComposition> query) =>
+    query.Select(f => new FamilyMemberDto(
+      f.FamilyCompId,
+      f.FamilyPersonId,
+      f.FamilyPerson!.FirstName,
+      f.FamilyPerson.MiddleName,
+      f.FamilyPerson.LastName,
+      f.RelationshipStatusId,
+      f.RelationshipStatus!.RelationshipStatusDesc));
 
   // Validates and copies the DTO onto the entity. Returns an error message, or null when valid.
   private async Task<string?> ApplyAsync(Person person, SavePersonDto dto)

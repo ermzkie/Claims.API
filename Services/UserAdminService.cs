@@ -110,7 +110,7 @@ public partial class UserAdminService
       CreatedBy = actorId,
       DateCreated = now,
     };
-    user.PasswordHash = PasswordHashing.Hasher.HashPassword(user, dto.TemporaryPassword!);
+    user.Password = PasswordHashing.Hasher.HashPassword(user, dto.TemporaryPassword!);
     foreach (var roleId in roleIds)
     {
       user.UserRoles.Add(new UserRole
@@ -265,7 +265,7 @@ public partial class UserAdminService
       return Invalid(passwordError);
     }
 
-    target.PasswordHash = PasswordHashing.Hasher.HashPassword(target, dto.TemporaryPassword!);
+    target.Password = PasswordHashing.Hasher.HashPassword(target, dto.TemporaryPassword!);
     target.MustChangePassword = true;
     target.FailedLoginCount = 0;
     target.LockoutEnd = null;

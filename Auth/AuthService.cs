@@ -78,7 +78,7 @@ public class AuthService
       return Locked(lockoutEnd, now);
     }
 
-    var verify = PasswordHashing.Hasher.VerifyHashedPassword(user, user.PasswordHash, password);
+    var verify = PasswordHashing.Hasher.VerifyHashedPassword(user, user.Password, password);
 
     // Deactivated counts as a failure even with the right password, so it looks like a wrong password
     if (verify == PasswordVerificationResult.Failed || !user.Status)
@@ -91,7 +91,7 @@ public class AuthService
     user.LastLoginDate = now;
     if (verify == PasswordVerificationResult.SuccessRehashNeeded)
     {
-      user.PasswordHash = PasswordHashing.Hasher.HashPassword(user, password);
+      user.Password = PasswordHashing.Hasher.HashPassword(user, password);
     }
     await _db.SaveChangesAsync();
 
@@ -122,7 +122,7 @@ public class AuthService
     }
 
     var verified = !string.IsNullOrEmpty(currentPassword)
-      && PasswordHashing.Hasher.VerifyHashedPassword(user, user.PasswordHash, currentPassword)
+      && PasswordHashing.Hasher.VerifyHashedPassword(user, user.Password, currentPassword)
         != PasswordVerificationResult.Failed;
     if (!verified)
     {
@@ -136,7 +136,7 @@ public class AuthService
       return new ChangePasswordResult(ChangePasswordOutcome.PolicyViolation, violation);
     }
 
-    user.PasswordHash = PasswordHashing.Hasher.HashPassword(user, newPassword!);
+    user.Password = PasswordHashing.Hasher.HashPassword(user, newPassword!);
     user.MustChangePassword = false;
     user.FailedLoginCount = 0;
     user.LockoutEnd = null;

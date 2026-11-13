@@ -86,7 +86,7 @@ public partial class Person
     [Column(TypeName = "decimal(18, 2)")]
     public decimal? EstimatedMonthlyIncome { get; set; }
 
-    public bool Status { get; set; } = true;
+    public bool Status { get; set; }
 
     public int? CreatedBy { get; set; }
 

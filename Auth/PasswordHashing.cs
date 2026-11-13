@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Identity;
 
 namespace Claims.API.Auth;
 
+// User.Password keeps the scaffolded name of the DB column but always holds a hash from
+// Hasher.HashPassword, never the plain password.
 public static class PasswordHashing
 {
   private static readonly PasswordHasher<User> _hasher = new();

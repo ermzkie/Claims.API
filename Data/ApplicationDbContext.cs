@@ -92,6 +92,12 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.CivilStatusId).ValueGeneratedNever();
         });
 
+        modelBuilder.Entity<Creditor>(entity =>
+        {
+            entity.Property(e => e.DateCreated).HasDefaultValueSql("(getdate())", "DF_Creditor_DateCreated");
+            entity.Property(e => e.Status).HasDefaultValue(true, "DF_Creditor_Status");
+        });
+
         modelBuilder.Entity<FamilyComposition>(entity =>
         {
             entity.Property(e => e.DateCreated).HasDefaultValueSql("(getdate())", "DF_FamilyComposition_DateCreated");
@@ -109,8 +115,8 @@ public partial class ApplicationDbContext : DbContext
         modelBuilder.Entity<FundSource>(entity =>
         {
             entity.Property(e => e.FundSourceId).ValueGeneratedNever();
-            entity.Property(e => e.DateEn).IsFixedLength();
-            entity.Property(e => e.Stat).IsFixedLength();
+            entity.Property(e => e.DateCreated).HasDefaultValueSql("(getdate())", "DF_FundSource_DateCreated");
+            entity.Property(e => e.Status).HasDefaultValue(true, "DF_FundSource_Status");
 
             entity.HasOne(d => d.Source).WithMany(p => p.FundSources).HasConstraintName("FK_FundSource_SourceOfAssistance");
         });
@@ -161,7 +167,6 @@ public partial class ApplicationDbContext : DbContext
 
         modelBuilder.Entity<Transaction>(entity =>
         {
-            entity.Property(e => e.TransactionId).ValueGeneratedNever();
             entity.Property(e => e.DateCreated).HasDefaultValueSql("(getdate())", "DF_Transactions_DateCreated");
             entity.Property(e => e.IsReleased).HasDefaultValue(false, "DF_Transactions_IsReleased");
             entity.Property(e => e.Status).HasDefaultValue(true, "DF_Transactions_isActive");
@@ -181,8 +186,6 @@ public partial class ApplicationDbContext : DbContext
 
         modelBuilder.Entity<TransactionService>(entity =>
         {
-            entity.Property(e => e.TranServiceId).ValueGeneratedNever();
-
             entity.HasOne(d => d.Nature).WithMany(p => p.TransactionServices).HasConstraintName("FK_TransactionServices_NatureOfService");
 
             entity.HasOne(d => d.Transaction).WithMany(p => p.TransactionServices)

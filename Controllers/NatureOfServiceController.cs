@@ -73,6 +73,7 @@ public class NatureOfServiceController : ControllerBase
     var record = new NatureOfService
     {
       NatureDesc = dto.NatureDesc.Trim(),
+      Status = true,
       CreatedBy = _currentUser.Id,
       DateCreated = DateTime.UtcNow.AddHours(8)
     };

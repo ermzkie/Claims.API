@@ -17,7 +17,7 @@ public partial class NatureOfService
     [Unicode(false)]
     public string? NatureDesc { get; set; }
 
-    public bool Status { get; set; } = true;
+    public bool Status { get; set; }
 
     public int? CreatedBy { get; set; }
 

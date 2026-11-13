@@ -17,6 +17,18 @@ public partial class Creditor
     [Unicode(false)]
     public string? CreditorName { get; set; }
 
+    public bool Status { get; set; }
+
+    public int? CreatedBy { get; set; }
+
+    [Column(TypeName = "datetime")]
+    public DateTime DateCreated { get; set; }
+
+    public int? LastUpdatedBy { get; set; }
+
+    [Column(TypeName = "datetime")]
+    public DateTime? DateLastUpdated { get; set; }
+
     [InverseProperty("Creditor")]
     public virtual ICollection<Transaction> Transactions { get; set; } = new List<Transaction>();
 }

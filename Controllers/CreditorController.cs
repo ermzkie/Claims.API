@@ -13,10 +13,12 @@ namespace Claims.API.Controllers;
 public class CreditorController : ControllerBase
 {
   private readonly ApplicationDbContext _context;
+  private readonly ICurrentUser _currentUser;
 
-  public CreditorController(ApplicationDbContext context)
+  public CreditorController(ApplicationDbContext context, ICurrentUser currentUser)
   {
     _context = context;
+    _currentUser = currentUser;
   }
 
   // GET: api/Creditor
@@ -25,6 +27,7 @@ public class CreditorController : ControllerBase
   {
     var records = await _context.Creditors
         .AsNoTracking()
+        .Where(x => x.Status)
         .Select(x => new CreditorResponseDto
         {
           CreditorId = x.CreditorId,
@@ -41,7 +44,7 @@ public class CreditorController : ControllerBase
   {
     var record = await _context.Creditors
         .AsNoTracking()
-        .Where(x => x.CreditorId == id)
+        .Where(x => x.CreditorId == id && x.Status)
         .Select(x => new CreditorResponseDto
         {
           CreditorId = x.CreditorId,
@@ -69,9 +72,18 @@ public class CreditorController : ControllerBase
       });
     }
 
+    var name = dto.CreditorName.Trim();
+    if (name.Length > 50)
+    {
+      return BadRequest(new { message = "Creditor name cannot exceed 50 characters." });
+    }
+
     var record = new Creditor
     {
-      CreditorName = dto.CreditorName.Trim()
+      CreditorName = name,
+      Status = true,
+      CreatedBy = _currentUser.Id,
+      DateCreated = DateTime.UtcNow.AddHours(8),
     };
 
     _context.Creditors.Add(record);
@@ -89,5 +101,56 @@ public class CreditorController : ControllerBase
         new { id = record.CreditorId },
         response
     );
+  }
+
+  // PUT: api/Creditor/1
+  [HttpPut("{id}")]
+  [Authorize(Policy = AuthPolicies.UserAdmin)]
+  public async Task<IActionResult> Update(int id, UpdateCreditorDto dto)
+  {
+    if (string.IsNullOrWhiteSpace(dto.CreditorName))
+    {
+      return BadRequest(new { message = "Creditor name cannot be empty." });
+    }
+
+    var name = dto.CreditorName.Trim();
+    if (name.Length > 50)
+    {
+      return BadRequest(new { message = "Creditor name cannot exceed 50 characters." });
+    }
+
+    var record = await _context.Creditors
+        .FirstOrDefaultAsync(x => x.CreditorId == id && x.Status);
+    if (record is null)
+    {
+      return NotFound(new { message = "Creditor not found." });
+    }
+
+    record.CreditorName = name;
+    record.LastUpdatedBy = _currentUser.Id;
+    record.DateLastUpdated = DateTime.UtcNow.AddHours(8);
+    await _context.SaveChangesAsync();
+
+    return NoContent();
+  }
+
+  // DELETE: api/Creditor/1
+  [HttpDelete("{id}")]
+  [Authorize(Policy = AuthPolicies.UserAdmin)]
+  public async Task<IActionResult> Delete(int id)
+  {
+    var record = await _context.Creditors
+        .FirstOrDefaultAsync(x => x.CreditorId == id && x.Status);
+    if (record is null)
+    {
+      return NotFound(new { message = "Creditor not found." });
+    }
+
+    record.Status = false;
+    record.LastUpdatedBy = _currentUser.Id;
+    record.DateLastUpdated = DateTime.UtcNow.AddHours(8);
+    await _context.SaveChangesAsync();
+
+    return NoContent();
   }
 }

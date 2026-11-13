@@ -92,6 +92,12 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.CivilStatusId).ValueGeneratedNever();
         });
 
+        modelBuilder.Entity<Creditor>(entity =>
+        {
+            entity.Property(e => e.DateCreated).HasDefaultValueSql("(getdate())", "DF_Creditor_DateCreated");
+            entity.Property(e => e.Status).HasDefaultValue(true, "DF_Creditor_Status");
+        });
+
         modelBuilder.Entity<FamilyComposition>(entity =>
         {
             entity.Property(e => e.DateCreated).HasDefaultValueSql("(getdate())", "DF_FamilyComposition_DateCreated");

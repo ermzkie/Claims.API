@@ -98,12 +98,12 @@ public class CreditorSummaryTests
     var (app, client) = await StartAsync();
     await using var _ = app;
 
-    var page1 = await client.GetFromJsonAsync<PagedResponseDto<CreditorClaimDto>>("/api/creditor/1/claims?pageSize=2");
+    var page1 = await client.GetFromJsonAsync<CreditorClaimsPageDto>("/api/creditor/1/claims?pageSize=2");
     Assert.Equal(4, page1!.TotalRecords);
     Assert.Equal(2, page1.TotalPages);
     Assert.Equal(["A-3", "A-2"], page1.Data.Select(c => c.RefNo));
 
-    var page2 = await client.GetFromJsonAsync<PagedResponseDto<CreditorClaimDto>>("/api/creditor/1/claims?pageSize=2&page=2");
+    var page2 = await client.GetFromJsonAsync<CreditorClaimsPageDto>("/api/creditor/1/claims?pageSize=2&page=2");
     Assert.Equal(["A-1", "A-4"], page2!.Data.Select(c => c.RefNo));
     var first = page2.Data[0];
     Assert.Equal("SANTOS, MARIA CRUZ", first.PatientName);
@@ -117,7 +117,7 @@ public class CreditorSummaryTests
     var (app, client) = await StartAsync();
     await using var _ = app;
 
-    var october = await client.GetFromJsonAsync<PagedResponseDto<CreditorClaimDto>>(
+    var october = await client.GetFromJsonAsync<CreditorClaimsPageDto>(
       "/api/creditor/1/claims?from=2026-10-01&to=2026-10-05");
     Assert.Equal(["A-2"], october!.Data.Select(c => c.RefNo));
 

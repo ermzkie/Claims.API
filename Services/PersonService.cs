@@ -148,7 +148,8 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
 
   public async Task<PersonResult> CreateAsync(int actorId, SavePersonDto dto)
   {
-    var person = new Person { CreatedBy = actorId };
+    // Set explicitly: re-generating the models from the database drops the `= true` default.
+    var person = new Person { CreatedBy = actorId, Status = true };
     var error = await ApplyAsync(person, dto);
     if (error is not null)
     {

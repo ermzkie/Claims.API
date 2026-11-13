@@ -264,6 +264,135 @@ public class PersonTests
   }
 
   [Fact]
+  public async Task AddFamilyMember_CreatesMemberForPerson()
+  {
+    var (app, client, userId) = await StartAsync();
+    await using (app)
+    {
+      var personId = await SeedLegacyAsync(app, "Maria", "Santos");
+      var familyPersonId = await SeedLegacyAsync(app, "Juan", "Santos");
+      await using (var db = app.CreateDbContext())
+      {
+        db.RelationshipStatuses.Add(new RelationshipStatus
+        {
+          RelationshipStatusId = 1,
+          RelationshipStatusDesc = "Sibling",
+        });
+        await db.SaveChangesAsync();
+      }
+
+      var response = await client.PostAsJsonAsync($"/api/persons/{personId}/family",
+        new { familyPersonId, relationshipStatusId = 1 });
+
+      Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+      var member = await Json(response);
+      Assert.Equal(familyPersonId, member.GetProperty("personId").GetInt32());
+      Assert.Equal("Juan", member.GetProperty("firstName").GetString());
+      Assert.Equal("Sibling", member.GetProperty("relationship").GetString());
+
+      await using var verify = app.CreateDbContext();
+      var saved = await verify.FamilyCompositions.AsNoTracking().SingleAsync();
+      Assert.Equal(personId, saved.PersonId);
+      Assert.Equal(familyPersonId, saved.FamilyPersonId);
+      Assert.Equal((short?)1, saved.RelationshipStatusId);
+      Assert.True(saved.Status);
+      Assert.Equal(userId, saved.CreatedBy);
+    }
+  }
+
+  [Fact]
+  public async Task AddFamilyMember_RejectsMissingPersonAndRelationship()
+  {
+    var (app, client, _) = await StartAsync();
+    await using (app)
+    {
+      var familyPersonId = await SeedLegacyAsync(app, "Juan", "Santos");
+      var missingPerson = await client.PostAsJsonAsync("/api/persons/99999/family",
+        new { familyPersonId });
+      var missingRelationship = await client.PostAsJsonAsync($"/api/persons/{familyPersonId}/family",
+        new { familyPersonId, relationshipStatusId = 99 });
+
+      Assert.Equal(HttpStatusCode.NotFound, missingPerson.StatusCode);
+      Assert.Equal(HttpStatusCode.BadRequest, missingRelationship.StatusCode);
+      Assert.Equal("Relationship status not found.", (await Json(missingRelationship)).GetProperty("message").GetString());
+    }
+  }
+
+  [Fact]
+  public async Task UpdateFamilyMember_ChangesMemberAndSetsAuditFields()
+  {
+    var (app, client, userId) = await StartAsync();
+    await using (app)
+    {
+      var personId = await SeedLegacyAsync(app, "Maria", "Santos");
+      var oldFamilyPersonId = await SeedLegacyAsync(app, "Juan", "Santos");
+      var newFamilyPersonId = await SeedLegacyAsync(app, "Ana", "Santos");
+      await using (var db = app.CreateDbContext())
+      {
+        db.RelationshipStatuses.AddRange(
+          new RelationshipStatus { RelationshipStatusId = 1, RelationshipStatusDesc = "Sibling" },
+          new RelationshipStatus { RelationshipStatusId = 2, RelationshipStatusDesc = "Child" });
+        db.FamilyCompositions.Add(new FamilyComposition
+        {
+          PersonId = personId,
+          FamilyPersonId = oldFamilyPersonId,
+          RelationshipStatusId = 1,
+          Status = true,
+          CreatedBy = userId,
+        });
+        await db.SaveChangesAsync();
+      }
+
+      await using var find = app.CreateDbContext();
+      var familyCompId = await find.FamilyCompositions.Select(f => f.FamilyCompId).SingleAsync();
+
+      var response = await client.PutAsJsonAsync(
+        $"/api/persons/{personId}/family/{familyCompId}",
+        new { familyPersonId = newFamilyPersonId, relationshipStatusId = 2 });
+
+      Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+      var member = await Json(response);
+      Assert.Equal(newFamilyPersonId, member.GetProperty("personId").GetInt32());
+      Assert.Equal("Ana", member.GetProperty("firstName").GetString());
+      Assert.Equal("Child", member.GetProperty("relationship").GetString());
+
+      await using var verify = app.CreateDbContext();
+      var saved = await verify.FamilyCompositions.AsNoTracking().SingleAsync();
+      Assert.Equal(newFamilyPersonId, saved.FamilyPersonId);
+      Assert.Equal((short?)2, saved.RelationshipStatusId);
+      Assert.Equal(userId, saved.LastUpdatedBy);
+      Assert.NotNull(saved.DateLastUpdated);
+    }
+  }
+
+  [Fact]
+  public async Task UpdateFamilyMember_ReturnsNotFoundForMemberOutsidePerson()
+  {
+    var (app, client, _) = await StartAsync();
+    await using (app)
+    {
+      var personId = await SeedLegacyAsync(app, "Maria", "Santos");
+      var familyPersonId = await SeedLegacyAsync(app, "Juan", "Santos");
+      await using var db = app.CreateDbContext();
+      db.FamilyCompositions.Add(new FamilyComposition
+      {
+        PersonId = personId,
+        FamilyPersonId = familyPersonId,
+        Status = true,
+        CreatedBy = 1,
+      });
+      await db.SaveChangesAsync();
+      var familyCompId = await db.FamilyCompositions.Select(f => f.FamilyCompId).SingleAsync();
+
+      var response = await client.PutAsJsonAsync(
+        $"/api/persons/{familyPersonId}/family/{familyCompId}",
+        new { familyPersonId });
+
+      Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+  }
+
+  [Fact]
   public async Task Search_MatchesEveryWord_InAnyNamePart_Paged()
   {
     var (app, client, _) = await StartAsync();

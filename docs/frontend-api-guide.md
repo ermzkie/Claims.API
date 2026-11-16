@@ -217,6 +217,11 @@ pages added to `routes.js` are protected automatically.
 | GET                 | `/api/dashboard`                 | logged in           | Home page figures for one month. Query: `year`, `month` (default this month)                  |
 | GET                 | `/api/dashboard/beneficiaries`   | logged in           | Who the claims were for. Query: `year`, `month`, `period` = `month` (default) or `year` (January up to the month) |
 | GET                 | `/api/dashboard/budget`          | Admin / Super Admin | Released and obligated per fund source from the finance system. Query: `year`               |
+| GET                 | `/api/person-review/duplicates`  | Admin / Super Admin | Possible duplicate persons, grouped, most claims first. Query: `search`, `decision` = `none` (to review, default), `same` or `different`, `page`, `pageSize` (max 100) |
+| GET                 | `/api/person-review/nameless`    | Admin / Super Admin | Persons with no last or first name, most claims first. Query: `page`, `pageSize` |
+| POST                | `/api/person-review/duplicates/same` | Admin / Super Admin | Confirm a whole group is one person, to merge later (204): `{ personIds, remark? }` |
+| POST                | `/api/person-review/duplicates/not-same` | Admin / Super Admin | Mark a whole group as different people (204): `{ personIds, remark? }` |
+| POST                | `/api/person-review/duplicates/reopen` | Admin / Super Admin | Undo that, same body (204) |
 
 Role IDs: 1 Super Administrator, 2 Administrator, 3 Frontliner, 4 Social Worker.
 Administrators can only manage Frontliner and Social Worker accounts. Nobody can give the Super
@@ -274,6 +279,19 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
   sources linked to a finance appropriation for that year show up. If the finance server can't be
   reached it returns 503 with a `message`; show that in the card and keep the rest of the page.
   Claims don't record their fund source yet, so the budget can't be matched to claims.
+
+### Things to know about person review
+
+- Nothing on persons or claims is changed or merged yet. The only thing saved is the decision
+  (`SamePerson`, `NotSamePerson` or `Reopened`) in AuditLog (`Entity` = `DuplicateGroup`), with who,
+  when and the remark. A decision can be changed straight from same to different and back.
+- **Possible duplicates** are active persons with the same last, first and middle name and the
+  same birthdate (a missing middle name or birthdate on both counts as the same). Each person shows
+  their claims as patient, claims as representative, last claim date and family links, so staff can
+  tell which record to keep.
+- A marked group leaves the to-review list until someone new with the same name and birthdate
+  is added, then it shows again with everyone. `personIds` must be the whole current group.
+- Claims from the old system count even though their status is 0; claims deleted in this app don't.
 
 ## Rules
 

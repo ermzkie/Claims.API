@@ -29,11 +29,11 @@ public class PersonSearchTests
         new Barangay { BarangayId = 101, BarangayName = "Morales", CityMunicipalityId = 10 },
         new Barangay { BarangayId = 200, BarangayName = "Reyes (Pob.)", CityMunicipalityId = 11 });
       db.People.AddRange(
-        new Person { PersonId = 5001, FirstName = "MARIA", LastName = "SANTOS", SexId = 2, BarangayId = 100, IsSeniorCitizen = true, Is4P = true, ContactNo = "0917 123 4567" },
-        new Person { PersonId = 5002, FirstName = "JOSE", LastName = "SANTOS", SexId = 1, BarangayId = 100, IsSeniorCitizen = true },
-        new Person { PersonId = 5003, FirstName = "ANA", LastName = "REYES", SexId = 2, BarangayId = 101, IsPwd = true, ContactNo = "+63 (918) 555-0000" },
-        new Person { PersonId = 5004, FirstName = "PEDRO", LastName = "CRUZ", SexId = 1, BarangayId = 200, Is4P = true },
-        new Person { PersonId = 5005, FirstName = "LIZA", LastName = "SANTOS", SexId = 2, BarangayId = 200, IsSoloParent = true });
+        new Person { Status = true, PersonId = 5001, FirstName = "MARIA", LastName = "SANTOS", SexId = 2, BarangayId = 100, IsSeniorCitizen = true, Is4P = true, ContactNo = "0917 123 4567" },
+        new Person { Status = true, PersonId = 5002, FirstName = "JOSE", LastName = "SANTOS", SexId = 1, BarangayId = 100, IsSeniorCitizen = true },
+        new Person { Status = true, PersonId = 5003, FirstName = "ANA", LastName = "REYES", SexId = 2, BarangayId = 101, IsPwd = true, ContactNo = "+63 (918) 555-0000" },
+        new Person { Status = true, PersonId = 5004, FirstName = "PEDRO", LastName = "CRUZ", SexId = 1, BarangayId = 200, Is4P = true },
+        new Person { Status = true, PersonId = 5005, FirstName = "LIZA", LastName = "SANTOS", SexId = 2, BarangayId = 200, IsSoloParent = true });
       await db.SaveChangesAsync();
     }
     return (app, await LoginAsAsync(app, "fl", Pw));

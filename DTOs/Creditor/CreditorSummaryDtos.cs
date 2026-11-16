@@ -69,3 +69,5 @@ public record CreditorClaimDetailDto(
   DateTime? DateCreated,
   string? LastUpdatedBy,
   DateTime? DateLastUpdated);
+
+public record CreditorMonthDto(int Month, int Claims, decimal Amount);

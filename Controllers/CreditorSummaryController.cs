@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
 using Claims.API.Data;
 using Claims.API.DTOs.Creditor;
 using Claims.API.Models;
@@ -105,92 +108,23 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
   [HttpGet("{id:int}/claims")]
   public async Task<ActionResult<CreditorClaimsPageDto>> Claims(
     int id,
+    [FromQuery] ClaimFilter filter,
     [FromQuery] int page = 1,
-    [FromQuery] int pageSize = 20,
-    [FromQuery] DateTime? from = null,
-    [FromQuery] DateTime? to = null,
-    [FromQuery] string? search = null,
-    [FromQuery] string? program = null,
-    [FromQuery] string sort = "date",
-    [FromQuery] string dir = "desc")
+    [FromQuery] int pageSize = 20)
   {
     if (page < 1 || pageSize < 1 || pageSize > MaxPageSize)
     {
       return BadRequest(new { message = $"Page must be 1 or more and page size between 1 and {MaxPageSize}." });
     }
-    if (from is not null && to is not null && from.Value.Date > to.Value.Date)
+    var (query, error) = await FilteredClaimsAsync(id, filter);
+    if (error is not null)
     {
-      return BadRequest(new { message = "The start date cannot be later than the end date." });
-    }
-    if (sort is not ("date" or "amount") || dir is not ("asc" or "desc"))
-    {
-      return BadRequest(new { message = "Sort must be date or amount, and dir asc or desc." });
-    }
-    if (!await context.Creditors.AnyAsync(c => c.CreditorId == id))
-    {
-      return NotFound(new { message = "Creditor not found." });
+      return error;
     }
 
-    var query = context.Transactions.AsNoTracking()
-      .Where(t => t.CreditorId == id && (t.Status || t.CreatedBy == null));
-    if (from is not null)
-    {
-      query = query.Where(t => t.Date >= from.Value.Date);
-    }
-    if (to is not null)
-    {
-      var endExclusive = to.Value.Date.AddDays(1);
-      query = query.Where(t => t.Date < endExclusive);
-    }
-    if (!string.IsNullOrWhiteSpace(program))
-    {
-      var code = program.Trim();
-      query = query.Where(t => t.AssistanceCode != null && t.AssistanceCode.Trim() == code);
-    }
-    if (!string.IsNullOrWhiteSpace(search))
-    {
-      // Names and ref nos are stored in capitals; matching in capitals works under any collation.
-      var whole = search.Trim().ToUpperInvariant();
-      // A ref no match satisfies every word; otherwise each word must be in the patient's name.
-      foreach (var word in whole.Split(' ', StringSplitOptions.RemoveEmptyEntries))
-      {
-        query = query.Where(t =>
-          (t.RefNo != null && t.RefNo.Contains(whole))
-          || (t.PatientPerson != null
-            && ((t.PatientPerson.LastName != null && t.PatientPerson.LastName.Contains(word))
-              || (t.PatientPerson.FirstName != null && t.PatientPerson.FirstName.Contains(word))
-              || (t.PatientPerson.MiddleName != null && t.PatientPerson.MiddleName.Contains(word)))));
-      }
-    }
-
-    var total = await query.CountAsync();
-    var totalAmount = await query.SumAsync(t => t.Amount) ?? 0;
-
-    var ordered = (sort, dir) switch
-    {
-      ("amount", "asc") => query.OrderBy(t => t.Amount == null).ThenBy(t => t.Amount),
-      ("amount", _) => query.OrderBy(t => t.Amount == null).ThenByDescending(t => t.Amount),
-      (_, "asc") => query.OrderBy(t => t.Date == null).ThenBy(t => t.Date),
-      _ => query.OrderBy(t => t.Date == null).ThenByDescending(t => t.Date),
-    };
-
-    var rows = await ordered
-      .ThenByDescending(t => t.TransactionId)
-      .Skip((page - 1) * pageSize)
-      .Take(pageSize)
-      .Select(t => new
-      {
-        t.TransactionId,
-        t.RefNo,
-        t.Date,
-        t.PatientPersonId,
-        Last = t.PatientPerson!.LastName,
-        First = t.PatientPerson.FirstName,
-        Middle = t.PatientPerson.MiddleName,
-        t.AssistanceCode,
-        t.Amount,
-      })
-      .ToListAsync();
+    var total = await query!.CountAsync();
+    var totalAmount = await query!.SumAsync(t => t.Amount) ?? 0;
+    var rows = await Rows(Sorted(query!, filter).Skip((page - 1) * pageSize).Take(pageSize)).ToListAsync();
     var programs = await ProgramNamesAsync();
 
     return new CreditorClaimsPageDto(
@@ -209,6 +143,164 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
           ProgramName(programs, r.AssistanceCode),
           r.Amount))
         .ToList());
+  }
+
+  // same filters as /claims, all rows, as csv
+  [HttpGet("{id:int}/claims/export")]
+  public async Task<IActionResult> Export(int id, [FromQuery] ClaimFilter filter)
+  {
+    var (query, error) = await FilteredClaimsAsync(id, filter);
+    if (error is not null)
+    {
+      return error;
+    }
+
+    var rows = await Rows(Sorted(query!, filter)).ToListAsync();
+    var programs = await ProgramNamesAsync();
+    var name = await context.Creditors.Where(c => c.CreditorId == id).Select(c => c.CreditorName).FirstAsync();
+
+    var csv = new StringBuilder();
+    csv.AppendLine("Ref No,Date,Patient,Program Code,Program,Amount");
+    foreach (var r in rows)
+    {
+      csv.AppendLine(string.Join(",",
+        Csv(r.RefNo),
+        Csv(r.Date?.ToString("yyyy-MM-dd")),
+        Csv(PersonName(r.Last, r.First, r.Middle)),
+        Csv(r.AssistanceCode?.Trim()),
+        Csv(ProgramName(programs, r.AssistanceCode)),
+        r.Amount?.ToString("0.00", CultureInfo.InvariantCulture) ?? ""));
+    }
+
+    var period = filter.From is null && filter.To is null
+      ? "all"
+      : $"{filter.From?.ToString("yyyy-MM-dd") ?? "start"}_to_{filter.To?.ToString("yyyy-MM-dd") ?? "now"}";
+    var fileName = $"{Regex.Replace(name ?? $"creditor-{id}", "[^A-Za-z0-9]+", "-").Trim('-')}_{period}.csv";
+    // bom so excel reads ñ correctly
+    return File(Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv.ToString())).ToArray(),
+      "text/csv", fileName);
+  }
+
+  // claims per month for one year
+  [HttpGet("{id:int}/months")]
+  public async Task<ActionResult<List<CreditorMonthDto>>> Months(int id, [FromQuery] int year)
+  {
+    if (!await context.Creditors.AnyAsync(c => c.CreditorId == id))
+    {
+      return NotFound(new { message = "Creditor not found." });
+    }
+
+    var start = new DateTime(year, 1, 1);
+    var end = start.AddYears(1);
+    var months = await context.Transactions.AsNoTracking()
+      .Where(t => t.CreditorId == id && (t.Status || t.CreatedBy == null) && t.Date >= start && t.Date < end)
+      .GroupBy(t => t.Date!.Value.Month)
+      .Select(g => new { Month = g.Key, Claims = g.Count(), Amount = g.Sum(t => t.Amount) })
+      .ToListAsync();
+
+    return months
+      .OrderBy(m => m.Month)
+      .Select(m => new CreditorMonthDto(m.Month, m.Claims, m.Amount ?? 0))
+      .ToList();
+  }
+
+  public class ClaimFilter
+  {
+    public DateTime? From { get; set; }
+    public DateTime? To { get; set; }
+    public string? Search { get; set; }
+    public string? Program { get; set; }
+    public string Sort { get; set; } = "date";
+    public string Dir { get; set; } = "desc";
+  }
+
+  private async Task<(IQueryable<Transaction>? Query, ActionResult? Error)> FilteredClaimsAsync(int id, ClaimFilter f)
+  {
+    if (f.From is not null && f.To is not null && f.From.Value.Date > f.To.Value.Date)
+    {
+      return (null, BadRequest(new { message = "The start date cannot be later than the end date." }));
+    }
+    if (f.Sort is not ("date" or "amount") || f.Dir is not ("asc" or "desc"))
+    {
+      return (null, BadRequest(new { message = "Sort must be date or amount, and dir asc or desc." }));
+    }
+    if (!await context.Creditors.AnyAsync(c => c.CreditorId == id))
+    {
+      return (null, NotFound(new { message = "Creditor not found." }));
+    }
+
+    var query = context.Transactions.AsNoTracking()
+      .Where(t => t.CreditorId == id && (t.Status || t.CreatedBy == null));
+    if (f.From is not null)
+    {
+      var from = f.From.Value.Date;
+      query = query.Where(t => t.Date >= from);
+    }
+    if (f.To is not null)
+    {
+      var endExclusive = f.To.Value.Date.AddDays(1);
+      query = query.Where(t => t.Date < endExclusive);
+    }
+    if (!string.IsNullOrWhiteSpace(f.Program))
+    {
+      var code = f.Program.Trim();
+      query = query.Where(t => t.AssistanceCode != null && t.AssistanceCode.Trim() == code);
+    }
+    if (!string.IsNullOrWhiteSpace(f.Search))
+    {
+      // Names and ref nos are stored in capitals; matching in capitals works under any collation.
+      var whole = f.Search.Trim().ToUpperInvariant();
+      // A ref no match satisfies every word; otherwise each word must be in the patient's name.
+      foreach (var word in whole.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+      {
+        query = query.Where(t =>
+          (t.RefNo != null && t.RefNo.Contains(whole))
+          || (t.PatientPerson != null
+            && ((t.PatientPerson.LastName != null && t.PatientPerson.LastName.Contains(word))
+              || (t.PatientPerson.FirstName != null && t.PatientPerson.FirstName.Contains(word))
+              || (t.PatientPerson.MiddleName != null && t.PatientPerson.MiddleName.Contains(word)))));
+      }
+    }
+    return (query, null);
+  }
+
+  private static IQueryable<Transaction> Sorted(IQueryable<Transaction> query, ClaimFilter f) =>
+    ((f.Sort, f.Dir) switch
+    {
+      ("amount", "asc") => query.OrderBy(t => t.Amount == null).ThenBy(t => t.Amount),
+      ("amount", _) => query.OrderBy(t => t.Amount == null).ThenByDescending(t => t.Amount),
+      (_, "asc") => query.OrderBy(t => t.Date == null).ThenBy(t => t.Date),
+      _ => query.OrderBy(t => t.Date == null).ThenByDescending(t => t.Date),
+    }).ThenByDescending(t => t.TransactionId);
+
+  private static IQueryable<ClaimRow> Rows(IQueryable<Transaction> query) =>
+    query.Select(t => new ClaimRow(
+      t.TransactionId,
+      t.RefNo,
+      t.Date,
+      t.PatientPersonId,
+      t.PatientPerson!.LastName,
+      t.PatientPerson.FirstName,
+      t.PatientPerson.MiddleName,
+      t.AssistanceCode,
+      t.Amount));
+
+  private sealed record ClaimRow(
+    int TransactionId, string? RefNo, DateTime? Date, int? PatientPersonId,
+    string? Last, string? First, string? Middle, string? AssistanceCode, decimal? Amount);
+
+  // quote text; a leading ' stops excel formulas (=, +, -, @)
+  private static string Csv(string? value)
+  {
+    if (string.IsNullOrEmpty(value))
+    {
+      return "";
+    }
+    if ("=+-@".Contains(value[0]))
+    {
+      value = "'" + value;
+    }
+    return "\"" + value.Replace("\"", "\"\"") + "\"";
   }
 
   // One claim of this creditor, with names instead of IDs.

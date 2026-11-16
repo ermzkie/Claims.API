@@ -1,6 +1,7 @@
 using Claims.API.Auth;
 using Claims.API.DTOs.Common;
 using Claims.API.DTOs.Persons;
+using Claims.API.DTOs.Transactions;
 using Claims.API.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -21,6 +22,21 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
   {
     var person = await persons.GetAsync(id);
     return person is null ? NotFound(new { message = "Person not found." }) : person;
+  }
+
+  [HttpGet("{id:int}/transactions")]
+  public async Task<ActionResult<PagedResult<TransactionResponseDto>>> GetTransactionHistory(
+    int id,
+    [FromQuery] int page = 1,
+    CancellationToken cancellationToken = default)
+  {
+    if (page < 1)
+      return BadRequest("Page must be greater than 0.");
+
+    var history = await persons.GetTransactionHistoryAsync(id, page, cancellationToken);
+    return history is null
+      ? NotFound(new { message = "Person not found." })
+      : Ok(history);
   }
 
   [HttpPost]

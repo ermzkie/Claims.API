@@ -217,6 +217,90 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
       rows.Count, page, pageSize, rows.Skip((page - 1) * pageSize).Take(pageSize).ToList());
   }
 
+  // a person's latest claims, as patient or representative, to help work out who they are
+  [HttpGet("persons/{id:int}/claims")]
+  public async Task<ActionResult<IReadOnlyList<PersonReviewClaimDto>>> Claims(int id, [FromQuery] int take = 10)
+  {
+    if (take is < 1 or > 50)
+    {
+      return BadRequest(new { message = "Take 1 to 50 claims." });
+    }
+    if (!await context.People.AnyAsync(p => p.PersonId == id))
+    {
+      return NotFound(new { message = "Person not found." });
+    }
+
+    var rows = await context.Transactions.AsNoTracking()
+      .Where(t => (t.Status || t.CreatedBy == null) && (t.PatientPersonId == id || t.RepresentativePersonId == id))
+      .OrderByDescending(t => t.Date).ThenByDescending(t => t.TransactionId)
+      .Take(take)
+      .Select(t => new
+      {
+        t.TransactionId,
+        t.RefNo,
+        t.Date,
+        t.PatientPersonId,
+        PatientLast = t.PatientPerson!.LastName,
+        PatientFirst = t.PatientPerson.FirstName,
+        PatientMiddle = t.PatientPerson.MiddleName,
+        t.RepresentativePersonId,
+        RepLast = t.RepresentativePerson!.LastName,
+        RepFirst = t.RepresentativePerson.FirstName,
+        RepMiddle = t.RepresentativePerson.MiddleName,
+        RepText = t.Representative,
+        t.AssistanceCode,
+        t.CreditorId,
+        CreditorName = t.Creditor!.CreditorName,
+        t.Amount,
+        WorkerLast = t.SocialWorkerUser!.Lastname,
+        WorkerFirst = t.SocialWorkerUser.Firstname,
+        t.SocialWorkerId,
+      })
+      .ToListAsync();
+
+    var programs = (await context.Assistances.AsNoTracking()
+        .Where(a => a.AssistanceCode != null)
+        .Select(a => new { a.AssistanceCode, a.AssistanceType })
+        .ToListAsync())
+      .GroupBy(a => a.AssistanceCode!.Trim().ToUpperInvariant())
+      .ToDictionary(g => g.Key, g => g.First().AssistanceType);
+
+    // old claims point at Officers, which also stores passwords: read names only
+    var officerIds = rows
+      .Select(r => int.TryParse(r.SocialWorkerId?.Trim(), out var n) ? n : (int?)null)
+      .OfType<int>()
+      .Distinct()
+      .ToList();
+    var officers = await context.Officers.AsNoTracking()
+      .Where(o => officerIds.Contains(o.Idnumber))
+      .Select(o => new { o.Idnumber, o.Name })
+      .ToDictionaryAsync(o => o.Idnumber, o => o.Name);
+
+    return rows.Select(r =>
+      {
+        var asPatient = r.PatientPersonId == id;
+        var other = asPatient
+          ? Join(", ", r.RepLast, Join(" ", r.RepFirst, r.RepMiddle)) ?? (string.IsNullOrWhiteSpace(r.RepText) ? null : r.RepText.Trim())
+          : Join(", ", r.PatientLast, Join(" ", r.PatientFirst, r.PatientMiddle));
+        var worker = Join(", ", r.WorkerLast, r.WorkerFirst)
+          ?? (int.TryParse(r.SocialWorkerId?.Trim(), out var officerId) ? officers.GetValueOrDefault(officerId)?.Trim() : null);
+        return new PersonReviewClaimDto(
+          r.TransactionId,
+          r.RefNo?.Trim(),
+          r.Date,
+          asPatient ? "patient" : "representative",
+          other,
+          asPatient ? r.RepresentativePersonId : r.PatientPersonId,
+          r.AssistanceCode?.Trim(),
+          r.AssistanceCode is null ? null : programs.GetValueOrDefault(r.AssistanceCode.Trim().ToUpperInvariant()),
+          r.CreditorId,
+          r.CreditorName,
+          r.Amount,
+          worker);
+      })
+      .ToList();
+  }
+
   private static bool ValidPage(int page, int pageSize) => page >= 1 && pageSize is >= 1 and <= MaxPageSize;
 
   private async Task<List<PersonReviewRowDto>> RowsAsync(List<int> ids)

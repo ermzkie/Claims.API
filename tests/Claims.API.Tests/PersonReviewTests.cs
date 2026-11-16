@@ -179,6 +179,38 @@ public class PersonReviewTests
   }
 
   [Fact]
+  public async Task PersonClaims_NewestFirst_WithTheOtherPersonOnTheClaim()
+  {
+    var (app, admin) = await StartAsync();
+    await using var _ = app;
+    await using (var db = app.CreateDbContext())
+    {
+      db.Officers.Add(new Officer { Idnumber = 7, Name = " OLD WORKER ", Password = "not read" });
+      db.Creditors.Add(new Creditor { CreditorId = 1, CreditorName = "HOSPITAL A", Status = true });
+      var claim = db.Transactions.Single(t => t.TransactionId == 7);
+      (claim.SocialWorkerId, claim.CreditorId, claim.Amount, claim.Representative) = ("7", 1, 1500m, " LOPEZ, BEN ");
+      await db.SaveChangesAsync();
+    }
+
+    var nameless = await admin.GetFromJsonAsync<List<PersonReviewClaimDto>>("/api/person-review/persons/40/claims");
+    Assert.Equal([7, 6, 5], nameless!.Select(c => c.TransactionId));
+    var latest = nameless[0];
+    Assert.Equal(("patient", "LOPEZ, BEN", "OLD WORKER", "HOSPITAL A", 1500m), (latest.Role, latest.OtherPerson, latest.SocialWorker, latest.CreditorName, latest.Amount));
+
+    var representative = Assert.Single((await admin.GetFromJsonAsync<List<PersonReviewClaimDto>>("/api/person-review/persons/21/claims"))!);
+    Assert.Equal(("representative", "REYES, ANA", 30), (representative.Role, representative.OtherPerson, representative.OtherPersonId));
+
+    // the claim deleted in this app is left out; the old-system one counts
+    Assert.Equal([1, 2], (await admin.GetFromJsonAsync<List<PersonReviewClaimDto>>("/api/person-review/persons/20/claims"))!.Select(c => c.TransactionId));
+    Assert.Single((await admin.GetFromJsonAsync<List<PersonReviewClaimDto>>("/api/person-review/persons/40/claims?take=1"))!);
+
+    Assert.Equal(HttpStatusCode.BadRequest, (await admin.GetAsync("/api/person-review/persons/40/claims?take=0")).StatusCode);
+    Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync("/api/person-review/persons/999/claims")).StatusCode);
+    var frontliner = await LoginAsAsync(app, "fl", Pw);
+    Assert.Equal(HttpStatusCode.Forbidden, (await frontliner.GetAsync("/api/person-review/persons/40/claims")).StatusCode);
+  }
+
+  [Fact]
   public async Task NotSamePerson_ComesBackWhenSomeoneNewJoins()
   {
     var (app, admin) = await StartAsync();

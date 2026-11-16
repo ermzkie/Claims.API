@@ -30,4 +30,19 @@ public record DuplicateDecisionDto(IReadOnlyList<int>? PersonIds, string? Remark
 // stored in AuditLog.NewValues
 public record DuplicateGroupValues(IReadOnlyList<int> PersonIds);
 
+// Role is "patient" or "representative"; OtherPerson is the one on the other side of the claim
+public record PersonReviewClaimDto(
+  int TransactionId,
+  string? RefNo,
+  DateTime? Date,
+  string Role,
+  string? OtherPerson,
+  int? OtherPersonId,
+  string? AssistanceCode,
+  string? Program,
+  int? CreditorId,
+  string? CreditorName,
+  decimal? Amount,
+  string? SocialWorker);
+
 public record PersonReviewPageDto<T>(int Total, int Page, int PageSize, IReadOnlyList<T> Items);

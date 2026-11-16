@@ -169,6 +169,7 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       .Include(transaction => transaction.TransactionServices)
       .Include(transaction => transaction.PatientPerson)
       .Include(transaction => transaction.RepresentativePerson)
+      .Include(transaction => transaction.SocialWorkerUser)
       .Skip((page - 1) * pageSize)
       .Take(pageSize)
       .ToListAsync(cancellationToken);

@@ -9,8 +9,8 @@ internal static class TransactionResponseMapper
   {
     TransactionId = transaction.TransactionId,
     AssistanceCode = transaction.AssistanceCode,
+    QueueNo = transaction.QueueNo,
     RefNo = transaction.RefNo,
-    SocialWorkerId = transaction.SocialWorkerId,
     Date = transaction.Date,
     PatientPersonId = transaction.PatientPersonId,
     PatientPersonName = PersonName(transaction.PatientPerson),
@@ -30,6 +30,7 @@ internal static class TransactionResponseMapper
     LastUpdatedBy = transaction.LastUpdatedBy,
     DateLastUpdated = transaction.DateLastUpdated,
     SocialWorkerUserId = transaction.SocialWorkerUserId,
+    SocialWorkerUserFullName = UserName(transaction.SocialWorkerUser),
     NatureIds = transaction.TransactionServices
       .Where(service => service.NatureId.HasValue)
       .Select(service => service.NatureId!.Value)
@@ -42,6 +43,17 @@ internal static class TransactionResponseMapper
       return null;
 
     var name = string.Join(" ", new[] { person.FirstName, person.MiddleName, person.LastName }
+      .Where(part => !string.IsNullOrWhiteSpace(part))
+      .Select(part => part!.Trim()));
+    return name.Length == 0 ? null : name;
+  }
+
+  private static string? UserName(User? user)
+  {
+    if (user is null)
+      return null;
+
+    var name = string.Join(" ", new[] { user.Firstname, user.Middlename, user.Lastname }
       .Where(part => !string.IsNullOrWhiteSpace(part))
       .Select(part => part!.Trim()));
     return name.Length == 0 ? null : name;

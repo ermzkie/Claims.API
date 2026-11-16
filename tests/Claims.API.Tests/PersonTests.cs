@@ -268,17 +268,21 @@ public class PersonTests
   [Fact]
   public async Task GetTransactionHistory_IncludesPatientAndRepresentativeTransactionsInNewestFirstOrder()
   {
-    var (app, client, _) = await StartAsync();
+    var (app, client, userId) = await StartAsync();
     await using (app)
     {
       var personId = await SeedLegacyAsync(app, "Maria", "Santos");
       var otherPersonId = await SeedLegacyAsync(app, "Juan", "Cruz");
       await using (var db = app.CreateDbContext())
       {
+        var worker = await db.Users.SingleAsync(user => user.UserId == userId);
+        worker.Firstname = "Pedro";
+        worker.Lastname = "Reyes";
         db.Transactions.AddRange(
           new Transaction
           {
             PatientPersonId = personId,
+            SocialWorkerUserId = userId,
             Date = new DateTime(2026, 1, 1),
             RefNo = "PATIENT",
             Status = true,
@@ -311,6 +315,9 @@ public class PersonTests
       Assert.Equal(
         ["REPRESENTATIVE", "PATIENT"],
         result.Items.Select(transaction => transaction.RefNo));
+      Assert.Equal(
+        "Pedro Reyes",
+        result.Items.Single(transaction => transaction.RefNo == "PATIENT").SocialWorkerUserFullName);
     }
   }
 

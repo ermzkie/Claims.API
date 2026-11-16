@@ -59,6 +59,9 @@ public partial class User
     [Column(TypeName = "datetime")]
     public DateTime? LastLoginDate { get; set; }
 
+    [InverseProperty("User")]
+    public virtual ICollection<AuditLog> AuditLogs { get; set; } = new List<AuditLog>();
+
     [ForeignKey("NameSuffixId")]
     [InverseProperty("Users")]
     public virtual NameSuffix? NameSuffix { get; set; }

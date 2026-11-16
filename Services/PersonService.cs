@@ -1,6 +1,7 @@
 using Claims.API.Data;
 using Claims.API.DTOs.Common;
 using Claims.API.DTOs.Persons;
+using Claims.API.DTOs.Transactions;
 using Claims.API.Models;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
@@ -146,6 +147,40 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
     dto.CityMunicipalityId = place?.CityMunicipalityId;
     dto.ProvinceId = place?.ProvinceId;
     return dto;
+  }
+
+  public async Task<PagedResult<TransactionResponseDto>?> GetTransactionHistoryAsync(
+    int personId,
+    int page,
+    CancellationToken cancellationToken = default)
+  {
+    if (!await db.People.AnyAsync(person => person.PersonId == personId, cancellationToken))
+    {
+      return null;
+    }
+
+    const int pageSize = 10;
+    var query = db.Transactions
+      .AsNoTracking()
+      .Where(transaction =>
+        transaction.PatientPersonId == personId || transaction.RepresentativePersonId == personId);
+    var total = await query.CountAsync(cancellationToken);
+    var transactions = await query
+      .OrderByDescending(transaction => transaction.Date)
+      .ThenByDescending(transaction => transaction.TransactionId)
+      .Include(transaction => transaction.TransactionServices)
+      .Include(transaction => transaction.PatientPerson)
+      .Include(transaction => transaction.RepresentativePerson)
+      .Skip((page - 1) * pageSize)
+      .Take(pageSize)
+      .ToListAsync(cancellationToken);
+
+    return new PagedResult<TransactionResponseDto>(
+      transactions.Select(TransactionResponseMapper.ToResponse).ToList(),
+      total,
+      page,
+      pageSize,
+      (int)Math.Ceiling((double)total / pageSize));
   }
 
   public async Task<PersonResult> CreateAsync(int actorId, SavePersonDto dto)

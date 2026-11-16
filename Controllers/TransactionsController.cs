@@ -3,6 +3,7 @@ using Claims.API.Data;
 using Claims.API.DTOs.Common;
 using Claims.API.DTOs.Transactions;
 using Claims.API.Models;
+using Claims.API.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -111,7 +112,7 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
 
     // 5. Build response
     var response = new PagedResult<TransactionResponseDto>(
-      transactions.Select(ToResponse).ToList(),
+      transactions.Select(TransactionResponseMapper.ToResponse).ToList(),
       parameters.Page,
       pageSize,
       totalRecords,
@@ -133,7 +134,7 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
 
     return transaction is null
       ? NotFound(new { message = "Transaction not found." })
-      : Ok(ToResponse(transaction));
+      : Ok(TransactionResponseMapper.ToResponse(transaction));
   }
 
   [HttpPost("save")]
@@ -211,7 +212,7 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
     }
 
     return isNew
-      ? CreatedAtAction(nameof(GetById), new { id = transaction.TransactionId }, ToResponse(transaction))
+      ? CreatedAtAction(nameof(GetById), new { id = transaction.TransactionId }, TransactionResponseMapper.ToResponse(transaction))
       : NoContent();
   }
 
@@ -229,47 +230,5 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
     await context.SaveChangesAsync();
 
     return NoContent();
-  }
-
-  private static TransactionResponseDto ToResponse(Transaction transaction) => new()
-  {
-    TransactionId = transaction.TransactionId,
-    AssistanceCode = transaction.AssistanceCode,
-    RefNo = transaction.RefNo,
-    SocialWorkerId = transaction.SocialWorkerId,
-    Date = transaction.Date,
-    PatientPersonId = transaction.PatientPersonId,
-    PatientPersonName = PersonName(transaction.PatientPerson),
-    RepresentativePersonId = transaction.RepresentativePersonId,
-    RepresentativePersonName = PersonName(transaction.RepresentativePerson),
-    Representative = transaction.Representative,
-    FundSourceId = transaction.FundSourceId,
-    CreditorId = transaction.CreditorId,
-    ModeId = transaction.ModeId,
-    Amount = transaction.Amount,
-    SocialWorkerAssessment = transaction.SocialWorkerAssessment,
-    Remarks = transaction.Remarks,
-    IsReleased = transaction.IsReleased,
-    Status = transaction.Status,
-    CreatedBy = transaction.CreatedBy,
-    DateCreated = transaction.DateCreated,
-    LastUpdatedBy = transaction.LastUpdatedBy,
-    DateLastUpdated = transaction.DateLastUpdated,
-    SocialWorkerUserId = transaction.SocialWorkerUserId,
-    NatureIds = transaction.TransactionServices
-      .Where(service => service.NatureId.HasValue)
-      .Select(service => service.NatureId!.Value)
-      .ToList(),
-  };
-
-  private static string? PersonName(Person? person)
-  {
-    if (person is null)
-      return null;
-
-    var name = string.Join(" ", new[] { person.FirstName, person.MiddleName, person.LastName }
-      .Where(part => !string.IsNullOrWhiteSpace(part))
-      .Select(part => part!.Trim()));
-    return name.Length == 0 ? null : name;
   }
 }

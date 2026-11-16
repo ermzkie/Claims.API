@@ -26,6 +26,7 @@ public class NatureOfServiceController : ControllerBase
   {
     var records = await _context.NatureOfServices
         .AsNoTracking()
+        .Where(x => x.Status == true)
         .Select(x => new NatureOfServiceResponseDto
         {
           NatureId = x.NatureId,

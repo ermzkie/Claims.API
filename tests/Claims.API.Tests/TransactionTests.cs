@@ -210,6 +210,16 @@ public class TransactionTests
 
     var detail = await client.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{transactionId}");
     Assert.Equal("Ana Maria Santos", detail!.SocialWorkerUserFullName);
+
+    var patientSearch = Uri.EscapeDataString("Maria Santos");
+    var patientMatches = await client.GetFromJsonAsync<PagedResult<TransactionResponseDto>>(
+      $"/api/transactions?search={patientSearch}");
+    var representativeSearch = Uri.EscapeDataString("Juan Dela Cruz");
+    var representativeMatches = await client.GetFromJsonAsync<PagedResult<TransactionResponseDto>>(
+      $"/api/transactions?search={representativeSearch}");
+
+    Assert.Single(patientMatches!.Items);
+    Assert.Single(representativeMatches!.Items);
   }
 
   [Fact]

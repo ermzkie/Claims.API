@@ -88,4 +88,16 @@ public class LookupsController(ApplicationDbContext context) : ControllerBase
       .Select(x => new LookupItemDto(x.BarangayId, x.BarangayCode, x.BarangayName))
       .ToListAsync();
   }
+
+  // Assistance has one row per budget period, so one entry per code
+  [HttpGet("assistance-programs")]
+  public async Task<ActionResult<List<AssistanceProgramDto>>> AssistancePrograms() =>
+    (await context.Assistances.AsNoTracking()
+      .Where(x => x.AssistanceCode != null && x.AssistanceType != null)
+      .Select(x => new { x.AssistanceCode, x.AssistanceType })
+      .ToListAsync())
+      .GroupBy(x => x.AssistanceCode!.Trim().ToUpperInvariant())
+      .Select(g => new AssistanceProgramDto(g.Key, g.First().AssistanceType!.Trim()))
+      .OrderBy(x => x.Code)
+      .ToList();
 }

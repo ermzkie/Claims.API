@@ -75,11 +75,19 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
   }
 
   [HttpDelete("{id:int}/family/{familyCompId:int}")]
-  public async Task<IActionResult> RemoveFamilyMember(int id, int familyCompId)
+  public async Task<IActionResult> RemoveFamilyMember(
+    int id, int familyCompId, [FromBody] RemoveFamilyMemberDto? dto = null)
   {
-    var result = await persons.RemoveFamilyMemberAsync(currentUser.Id, id, familyCompId);
+    var result = await persons.RemoveFamilyMemberAsync(currentUser.Id, id, familyCompId, dto?.Remark);
     return result.Outcome == PersonOutcome.Ok ? NoContent() : Map(result);
   }
+
+  // family change log, newest first
+  [HttpGet("{id:int}/family/history")]
+  public async Task<ActionResult<List<FamilyChangeDto>>> FamilyHistory(int id) =>
+    await persons.FamilyHistoryAsync(id) is { } history
+      ? history
+      : NotFound(new { message = "Person not found." });
 
   private ActionResult Map(PersonResult result) => result.Outcome switch
   {

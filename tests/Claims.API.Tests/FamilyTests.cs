@@ -145,4 +145,59 @@ public class FamilyTests
     Assert.Equal(HttpStatusCode.Created, added.StatusCode);
     Assert.Equal(HttpStatusCode.OK, updated.StatusCode);
   }
+
+  [Fact]
+  public async Task EveryChange_IsLogged_WithOldAndNewValuesWhoAndRemark()
+  {
+    var (app, client, userId) = await StartAsync();
+    await using var _app = app;
+
+    var added = await client.PostAsJsonAsync($"/api/persons/{Maria}/family", new { familyPersonId = Juan, relationshipStatusId = 1, remark = "per barangay cert" });
+    var id = JsonDocument.Parse(await added.Content.ReadAsStringAsync()).RootElement.GetProperty("familyCompId").GetInt32();
+    await client.PutAsJsonAsync($"/api/persons/{Maria}/family/{id}", new { familyPersonId = Juan, relationshipStatusId = 1 });
+    await client.PutAsJsonAsync($"/api/persons/{Maria}/family/{id}", new { familyPersonId = Juan, relationshipStatusId = 2 });
+    await client.SendAsync(new HttpRequestMessage(HttpMethod.Delete, $"/api/persons/{Maria}/family/{id}")
+    {
+      Content = JsonContent.Create(new { remark = "entered by mistake" }),
+    });
+
+    var history = JsonDocument.Parse(await client.GetStringAsync($"/api/persons/{Maria}/family/history")).RootElement.EnumerateArray().ToList();
+    Assert.Equal(["Removed", "Changed", "Added"], history.Select(h => h.GetProperty("action").GetString()));
+
+    var addedLog = history[2];
+    Assert.Equal(JsonValueKind.Null, addedLog.GetProperty("old").ValueKind);
+    Assert.Equal("SANTOS, JUAN", addedLog.GetProperty("new").GetProperty("member").GetString());
+    Assert.Equal("Son", addedLog.GetProperty("new").GetProperty("relationship").GetString());
+    Assert.Equal("per barangay cert", addedLog.GetProperty("remark").GetString());
+    Assert.Equal("fl", addedLog.GetProperty("changedBy").GetString());
+
+    var changedLog = history[1];
+    Assert.Equal("Son", changedLog.GetProperty("old").GetProperty("relationship").GetString());
+    Assert.Equal("Mother", changedLog.GetProperty("new").GetProperty("relationship").GetString());
+
+    var removedLog = history[0];
+    Assert.Equal("Mother", removedLog.GetProperty("old").GetProperty("relationship").GetString());
+    Assert.Equal("entered by mistake", removedLog.GetProperty("remark").GetString());
+    Assert.Equal(id, removedLog.GetProperty("familyCompId").GetInt32());
+
+    await using var db = app.CreateDbContext();
+    Assert.All(await db.AuditLogs.AsNoTracking().ToListAsync(), a => Assert.Equal(userId, a.UserId));
+  }
+
+  [Fact]
+  public async Task TooLongRemark_SavesNothing_AndHistoryNeedsAPerson()
+  {
+    var (app, client, _) = await StartAsync();
+    await using var _app = app;
+
+    var response = await client.PostAsJsonAsync($"/api/persons/{Maria}/family", new { familyPersonId = Juan, relationshipStatusId = 1, remark = new string('x', 501) });
+
+    Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    await using (var db = app.CreateDbContext())
+    {
+      Assert.Empty(await db.FamilyCompositions.ToListAsync());
+      Assert.Empty(await db.AuditLogs.ToListAsync());
+    }
+    Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/persons/999/family/history")).StatusCode);
+  }
 }

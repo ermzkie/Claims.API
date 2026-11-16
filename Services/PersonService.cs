@@ -3,6 +3,7 @@ using Claims.API.DTOs.Common;
 using Claims.API.DTOs.Persons;
 using Claims.API.DTOs.Transactions;
 using Claims.API.Models;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 
@@ -221,12 +222,14 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
     {
       return new FamilyMemberResult(PersonOutcome.NotFound, "Person not found.");
     }
-    var error = await ValidateFamilyMemberAsync(personId, dto, exceptFamilyCompId: null);
+    var error = await ValidateFamilyMemberAsync(personId, dto, exceptFamilyCompId: null) ?? RemarkError(dto.Remark);
     if (error is not null)
     {
       return new FamilyMemberResult(PersonOutcome.Invalid, error);
     }
 
+    // link and log entry save together
+    await using var transaction = await db.Database.BeginTransactionAsync();
     var familyComposition = new FamilyComposition
     {
       PersonId = personId,
@@ -237,6 +240,10 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
     };
     db.FamilyCompositions.Add(familyComposition);
     await db.SaveChangesAsync();
+    LogFamily(actorId, personId, familyComposition.FamilyCompId, "Added",
+      null, await LinkValuesAsync(dto.FamilyPersonId, dto.RelationshipStatusId), dto.Remark);
+    await db.SaveChangesAsync();
+    await transaction.CommitAsync();
 
     var familyMember = await FamilyMemberProjection(db.FamilyCompositions.AsNoTracking()
       .Where(f => f.FamilyCompId == familyComposition.FamilyCompId)).SingleAsync();
@@ -253,12 +260,19 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       return new FamilyMemberResult(PersonOutcome.NotFound, "Family member not found.");
     }
 
-    var error = await ValidateFamilyMemberAsync(personId, dto, exceptFamilyCompId: familyCompId);
+    var error = await ValidateFamilyMemberAsync(personId, dto, exceptFamilyCompId: familyCompId) ?? RemarkError(dto.Remark);
     if (error is not null)
     {
       return new FamilyMemberResult(PersonOutcome.Invalid, error);
     }
 
+    if (familyComposition.FamilyPersonId != dto.FamilyPersonId
+      || familyComposition.RelationshipStatusId != dto.RelationshipStatusId)
+    {
+      LogFamily(actorId, personId, familyCompId, "Changed",
+        await LinkValuesAsync(familyComposition.FamilyPersonId, familyComposition.RelationshipStatusId),
+        await LinkValuesAsync(dto.FamilyPersonId, dto.RelationshipStatusId), dto.Remark);
+    }
     familyComposition.FamilyPersonId = dto.FamilyPersonId;
     familyComposition.RelationshipStatusId = dto.RelationshipStatusId;
     familyComposition.LastUpdatedBy = actorId;
@@ -271,8 +285,12 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
   }
 
   // soft delete (status false)
-  public async Task<FamilyMemberResult> RemoveFamilyMemberAsync(int actorId, int personId, int familyCompId)
+  public async Task<FamilyMemberResult> RemoveFamilyMemberAsync(int actorId, int personId, int familyCompId, string? remark)
   {
+    if (RemarkError(remark) is { } error)
+    {
+      return new FamilyMemberResult(PersonOutcome.Invalid, error);
+    }
     var familyComposition = await db.FamilyCompositions.FirstOrDefaultAsync(f =>
       f.PersonId == personId && f.FamilyCompId == familyCompId && f.Status);
     if (familyComposition is null)
@@ -280,6 +298,8 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       return new FamilyMemberResult(PersonOutcome.NotFound, "Family member not found.");
     }
 
+    LogFamily(actorId, personId, familyCompId, "Removed",
+      await LinkValuesAsync(familyComposition.FamilyPersonId, familyComposition.RelationshipStatusId), null, remark);
     familyComposition.Status = false;
     familyComposition.LastUpdatedBy = actorId;
     familyComposition.DateLastUpdated = Now();
@@ -346,6 +366,73 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       f.Person.CivilStatus != null ? f.Person.CivilStatus.CivilStatusDesc : null,
       f.Person.EstimatedMonthlyIncome,
       f.Person.ContactNo));
+
+  private const string FamilyEntity = "FamilyComposition";
+  private const int MaxRemark = 500;
+  private static readonly JsonSerializerOptions LogJson = new(JsonSerializerDefaults.Web);
+
+  private static string? RemarkError(string? remark) =>
+    remark?.Trim().Length > MaxRemark ? $"The remark can be at most {MaxRemark} characters." : null;
+
+  private async Task<FamilyLinkValues> LinkValuesAsync(int? familyPersonId, short? relationshipId)
+  {
+    var member = await db.People.AsNoTracking()
+      .Where(p => p.PersonId == familyPersonId)
+      .Select(p => new { p.LastName, p.FirstName, p.MiddleName })
+      .FirstOrDefaultAsync();
+    var relationship = await db.RelationshipStatuses.AsNoTracking()
+      .Where(r => r.RelationshipStatusId == relationshipId)
+      .Select(r => r.RelationshipStatusDesc)
+      .FirstOrDefaultAsync();
+    var name = member is null
+      ? null
+      : string.Join(" ", new[] { member.LastName is null ? null : $"{member.LastName},", member.FirstName, member.MiddleName }
+          .Where(n => !string.IsNullOrWhiteSpace(n)));
+    return new FamilyLinkValues(familyPersonId, name, relationshipId, relationship);
+  }
+
+  private void LogFamily(int actorId, int personId, int familyCompId, string action,
+    FamilyLinkValues? oldValues, FamilyLinkValues? newValues, string? remark) =>
+    db.AuditLogs.Add(new AuditLog
+    {
+      Entity = FamilyEntity,
+      EntityId = familyCompId,
+      PersonId = personId,
+      Action = action,
+      OldValues = oldValues is null ? null : JsonSerializer.Serialize(oldValues, LogJson),
+      NewValues = newValues is null ? null : JsonSerializer.Serialize(newValues, LogJson),
+      Remark = string.IsNullOrWhiteSpace(remark) ? null : remark.Trim(),
+      UserId = actorId,
+      DateCreated = Now(),
+    });
+
+  // newest first; null when the person doesn't exist
+  public async Task<List<FamilyChangeDto>?> FamilyHistoryAsync(int personId)
+  {
+    if (!await db.People.AnyAsync(p => p.PersonId == personId))
+    {
+      return null;
+    }
+    var rows = await db.AuditLogs.AsNoTracking()
+      .Where(a => a.Entity == FamilyEntity && a.PersonId == personId)
+      .OrderByDescending(a => a.DateCreated).ThenByDescending(a => a.AuditLogId)
+      .Select(a => new
+      {
+        a.AuditLogId, a.EntityId, a.Action, a.OldValues, a.NewValues, a.Remark, a.DateCreated,
+        a.User.Lastname, a.User.Firstname, a.User.Username,
+      })
+      .ToListAsync();
+    return rows.Select(a => new FamilyChangeDto(
+        a.AuditLogId,
+        a.EntityId,
+        a.Action,
+        a.OldValues is null ? null : JsonSerializer.Deserialize<FamilyLinkValues>(a.OldValues, LogJson),
+        a.NewValues is null ? null : JsonSerializer.Deserialize<FamilyLinkValues>(a.NewValues, LogJson),
+        a.Remark,
+        a.Lastname is null && a.Firstname is null ? a.Username : $"{a.Lastname}, {a.Firstname}".Trim(' ', ','),
+        a.DateCreated))
+      .ToList();
+  }
 
   // Validates and copies the DTO onto the entity. Returns an error message, or null when valid.
   private async Task<string?> ApplyAsync(Person person, SavePersonDto dto)

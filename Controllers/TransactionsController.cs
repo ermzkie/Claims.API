@@ -60,10 +60,22 @@ public class TransactionsController(
     if (!string.IsNullOrWhiteSpace(parameters.Search))
     {
       var search = parameters.Search.Trim();
+      var namePattern = $"%{string.Join("%", search.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(EscapeLike))}%";
 
       query = query.Where(x =>
-          !string.IsNullOrEmpty(x.RefNo) &&
-          x.RefNo.Contains(search));
+          (!string.IsNullOrEmpty(x.RefNo) && x.RefNo.Contains(search))
+          || (x.PatientPerson != null && EF.Functions.Like(
+            (x.PatientPerson.FirstName ?? "") + " " +
+            (x.PatientPerson.MiddleName ?? "") + " " +
+            (x.PatientPerson.LastName ?? ""),
+            namePattern,
+            "\\"))
+          || (x.RepresentativePerson != null && EF.Functions.Like(
+            (x.RepresentativePerson.FirstName ?? "") + " " +
+            (x.RepresentativePerson.MiddleName ?? "") + " " +
+            (x.RepresentativePerson.LastName ?? ""),
+            namePattern,
+            "\\")));
     }
 
     // Count filtered records before pagination
@@ -273,4 +285,7 @@ public class TransactionsController(
 
     return NoContent();
   }
+
+  private static string EscapeLike(string value) =>
+    value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[");
 }

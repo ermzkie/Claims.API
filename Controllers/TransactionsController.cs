@@ -1,5 +1,6 @@
 using Claims.API.Auth;
 using Claims.API.Data;
+using Claims.API.DTOs.Common;
 using Claims.API.DTOs.Transactions;
 using Claims.API.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -12,7 +13,7 @@ namespace Claims.API.Controllers;
 public class TransactionsController(ApplicationDbContext context, ICurrentUser currentUser) : ControllerBase
 {
   [HttpGet]
-  public async Task<ActionResult<PagedResponseDto<TransactionResponseDto>>> GetAll(
+  public async Task<ActionResult<PagedResult<TransactionResponseDto>>> GetAll(
           [FromQuery] TransactionQueryParameters parameters)
   {
     const int pageSize = 10;
@@ -102,21 +103,19 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
     // 4. Pagination
     var transactions = await orderedQuery
         .Include(x => x.TransactionServices)
+        .Include(x => x.PatientPerson)
+        .Include(x => x.RepresentativePerson)
         .Skip((parameters.Page - 1) * pageSize)
         .Take(pageSize)
         .ToListAsync();
 
     // 5. Build response
-    var response = new PagedResponseDto<TransactionResponseDto>
-    {
-      Page = parameters.Page,
-      PageSize = pageSize,
-      TotalRecords = totalRecords,
-      TotalPages = (int)Math.Ceiling(
-            (double)totalRecords / pageSize),
-
-      Data = transactions.Select(ToResponse).ToList()
-    };
+    var response = new PagedResult<TransactionResponseDto>(
+      transactions.Select(ToResponse).ToList(),
+      parameters.Page,
+      pageSize,
+      totalRecords,
+      (int)Math.Ceiling((double)totalRecords / pageSize));
 
     return Ok(response);
   }
@@ -127,6 +126,8 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
     var transaction = await context.Transactions
       .AsNoTracking()
       .Include(x => x.TransactionServices)
+      .Include(x => x.PatientPerson)
+      .Include(x => x.RepresentativePerson)
       .Where(x => x.TransactionId == id)
       .FirstOrDefaultAsync();
 
@@ -238,7 +239,9 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
     SocialWorkerId = transaction.SocialWorkerId,
     Date = transaction.Date,
     PatientPersonId = transaction.PatientPersonId,
+    PatientPersonName = PersonName(transaction.PatientPerson),
     RepresentativePersonId = transaction.RepresentativePersonId,
+    RepresentativePersonName = PersonName(transaction.RepresentativePerson),
     Representative = transaction.Representative,
     FundSourceId = transaction.FundSourceId,
     CreditorId = transaction.CreditorId,
@@ -258,4 +261,15 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
       .Select(service => service.NatureId!.Value)
       .ToList(),
   };
+
+  private static string? PersonName(Person? person)
+  {
+    if (person is null)
+      return null;
+
+    var name = string.Join(" ", new[] { person.FirstName, person.MiddleName, person.LastName }
+      .Where(part => !string.IsNullOrWhiteSpace(part))
+      .Select(part => part!.Trim()));
+    return name.Length == 0 ? null : name;
+  }
 }

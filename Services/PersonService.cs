@@ -109,7 +109,9 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
         p.IsSeniorCitizen == true, p.IsSoloParent == true, p.IsPwd == true, p.Is4P == true))
       .ToListAsync();
 
-    return new PagedResult<PersonListItemDto>(items, total, page, pageSize);
+    var totalPages = (int)Math.Ceiling((double)total / pageSize);
+
+    return new PagedResult<PersonListItemDto>(items, total, page, pageSize, totalPages);
   }
 
   public async Task<PersonDto?> GetAsync(int id)

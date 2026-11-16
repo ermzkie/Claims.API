@@ -12,6 +12,7 @@ public partial class ApplicationDbContext : DbContext
     {
     }
 
+    public DbSet<AnnualBalanceResult> AnnualBalanceResults { get; set; }
     public virtual DbSet<Address> Addresses { get; set; }
 
     public virtual DbSet<Assistance> Assistances { get; set; }
@@ -216,6 +217,8 @@ public partial class ApplicationDbContext : DbContext
         });
 
         OnModelCreatingPartial(modelBuilder);
+
+        modelBuilder.Entity<AnnualBalanceResult>().HasNoKey();
     }
 
     partial void OnModelCreatingPartial(ModelBuilder modelBuilder);

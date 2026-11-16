@@ -66,9 +66,6 @@ public partial class User
     [InverseProperty("Users")]
     public virtual NameSuffix? NameSuffix { get; set; }
 
-    [InverseProperty("User")]
-    public virtual ICollection<AuditLog> AuditLogs { get; set; } = new List<AuditLog>();
-
     [InverseProperty("CreatedByNavigation")]
     public virtual ICollection<Person> People { get; set; } = new List<Person>();
 

@@ -108,7 +108,7 @@ public class ReferenceDataTests
     var (app, admin) = await StartAsync();
     await using (app)
     {
-      var relationship = await admin.PostAsJsonAsync("/api/reference-data/relationships", new { name = "Spouse" });
+      var relationship = await admin.PostAsJsonAsync("/api/reference-data/relationships", new { name = "Spouse", group = "Spouse/Partner" });
       var suffix = await admin.PostAsJsonAsync("/api/reference-data/name-suffixes", new { name = "Sr." });
 
       Assert.Equal(new Item(1, null, "Spouse", 0), await relationship.Content.ReadFromJsonAsync<Item>());

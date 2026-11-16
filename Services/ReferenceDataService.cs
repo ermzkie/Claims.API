@@ -26,13 +26,16 @@ public class ReferenceDataService(ApplicationDbContext db)
     ListInfoDto Info { get; }
     Task<bool> NameTakenAsync(ApplicationDbContext db, string candidate, int? exceptId);
     Task<List<ListItemDto>> AllAsync(ApplicationDbContext db);
-    Task<ListItemDto> AddAsync(ApplicationDbContext db, string? code, string name);
-    Task<ListItemDto?> UpdateAsync(ApplicationDbContext db, int id, string? code, string name);
+    Task<ListItemDto> AddAsync(ApplicationDbContext db, string? code, string name, string? group);
+    Task<ListItemDto?> UpdateAsync(ApplicationDbContext db, int id, string? code, string name, string? group);
     Task<(bool Found, ListItemDto? Item)> FindAsync(ApplicationDbContext db, int id);
     Task DeleteAsync(ApplicationDbContext db, int id);
   }
 
   // Each table is a handful of rows, so rows are loaded and matched in memory.
+  // fixed group list, relationships only
+  private sealed record Groups<T>(IReadOnlyList<string> Choices, Func<T, string?> Get, Action<T, string?> Set);
+
   private sealed class Lookup<T>(
     string key,
     string title,
@@ -44,12 +47,13 @@ public class ReferenceDataService(ApplicationDbContext db)
     Func<T, string?> code,
     Func<T, string?> name,
     Action<T, string?, string> write,
-    Func<ApplicationDbContext, int, Task<int>> usedBy) : ILookup where T : class, new()
+    Func<ApplicationDbContext, int, Task<int>> usedBy,
+    Groups<T>? groups = null) : ILookup where T : class, new()
   {
-    public ListInfoDto Info { get; } = new(key, title, hasCode);
+    public ListInfoDto Info { get; } = new(key, title, hasCode, groups?.Choices);
 
     private async Task<ListItemDto> ToDtoAsync(ApplicationDbContext db, T row) =>
-      new(id(row), hasCode ? code(row) : null, name(row) ?? "", await usedBy(db, id(row)));
+      new(id(row), hasCode ? code(row) : null, name(row) ?? "", await usedBy(db, id(row)), groups?.Get(row));
 
     public async Task<List<ListItemDto>> AllAsync(ApplicationDbContext db)
     {
@@ -62,7 +66,7 @@ public class ReferenceDataService(ApplicationDbContext db)
       return items;
     }
 
-    public async Task<ListItemDto> AddAsync(ApplicationDbContext db, string? newCode, string newName)
+    public async Task<ListItemDto> AddAsync(ApplicationDbContext db, string? newCode, string newName, string? group)
     {
       var row = new T();
       if (numberedByHand)
@@ -71,12 +75,13 @@ public class ReferenceDataService(ApplicationDbContext db)
         setId(row, ids.Count == 0 ? 1 : ids.Max(id) + 1);
       }
       write(row, newCode, newName);
+      groups?.Set(row, group);
       set(db).Add(row);
       await db.SaveChangesAsync();
       return await ToDtoAsync(db, row);
     }
 
-    public async Task<ListItemDto?> UpdateAsync(ApplicationDbContext db, int rowId, string? newCode, string newName)
+    public async Task<ListItemDto?> UpdateAsync(ApplicationDbContext db, int rowId, string? newCode, string newName, string? group)
     {
       var row = (await set(db).ToListAsync()).FirstOrDefault(r => id(r) == rowId);
       if (row is null)
@@ -84,6 +89,7 @@ public class ReferenceDataService(ApplicationDbContext db)
         return null;
       }
       write(row, newCode, newName);
+      groups?.Set(row, group);
       await db.SaveChangesAsync();
       return await ToDtoAsync(db, row);
     }
@@ -121,7 +127,8 @@ public class ReferenceDataService(ApplicationDbContext db)
     new Lookup<RelationshipStatus>("relationships", "Relationships", hasCode: false, numberedByHand: true,
       d => d.RelationshipStatuses, r => r.RelationshipStatusId, (r, v) => r.RelationshipStatusId = (short)v,
       _ => null, r => r.RelationshipStatusDesc, (r, _, n) => r.RelationshipStatusDesc = n,
-      (d, v) => d.FamilyCompositions.CountAsync(f => f.RelationshipStatusId == v)),
+      (d, v) => d.FamilyCompositions.CountAsync(f => f.RelationshipStatusId == v),
+      new Groups<RelationshipStatus>(RelationshipGroups.All, r => r.RelationshipGroup, (r, g) => r.RelationshipGroup = g)),
 
     new Lookup<SourceOfAssistance>("sources-of-assistance", "Sources of assistance", hasCode: false, numberedByHand: false,
       d => d.SourceOfAssistances, r => r.SourceId, (_, _) => { },
@@ -147,8 +154,8 @@ public class ReferenceDataService(ApplicationDbContext db)
     {
       return new ListResult(ListOutcome.NotFound, "List not found.");
     }
-    var (error, code, name) = await ValidateAsync(list, dto, exceptId: null);
-    return error ?? new ListResult(ListOutcome.Ok, Item: await list.AddAsync(db, code, name!));
+    var (error, code, name, group) = await ValidateAsync(list, dto, exceptId: null);
+    return error ?? new ListResult(ListOutcome.Ok, Item: await list.AddAsync(db, code, name!, group));
   }
 
   public async Task<ListResult> UpdateAsync(string key, int id, SaveListItemDto dto)
@@ -157,8 +164,8 @@ public class ReferenceDataService(ApplicationDbContext db)
     {
       return new ListResult(ListOutcome.NotFound, "Value not found.");
     }
-    var (error, code, name) = await ValidateAsync(list, dto, exceptId: id);
-    return error ?? new ListResult(ListOutcome.Ok, Item: await list.UpdateAsync(db, id, code, name!));
+    var (error, code, name, group) = await ValidateAsync(list, dto, exceptId: id);
+    return error ?? new ListResult(ListOutcome.Ok, Item: await list.UpdateAsync(db, id, code, name!, group));
   }
 
   public async Task<ListResult> DeleteAsync(string key, int id)
@@ -176,21 +183,31 @@ public class ReferenceDataService(ApplicationDbContext db)
     return new ListResult(ListOutcome.Ok);
   }
 
-  private async Task<(ListResult? Error, string? Code, string? Name)> ValidateAsync(ILookup list, SaveListItemDto dto, int? exceptId)
+  private async Task<(ListResult? Error, string? Code, string? Name, string? Group)> ValidateAsync(
+    ILookup list, SaveListItemDto dto, int? exceptId)
   {
     var name = Clean(dto.Name);
     var code = list.Info.HasCode ? Clean(dto.Code) : null;
     if (name is null)
     {
-      return (new ListResult(ListOutcome.Invalid, "Name is required."), null, null);
+      return (new ListResult(ListOutcome.Invalid, "Name is required."), null, null, null);
     }
     if (name.Length > MaxText || code?.Length > MaxText)
     {
-      return (new ListResult(ListOutcome.Invalid, $"Name can be at most {MaxText} characters."), null, null);
+      return (new ListResult(ListOutcome.Invalid, $"Name can be at most {MaxText} characters."), null, null, null);
+    }
+    string? group = null;
+    if (list.Info.Groups is { } choices)
+    {
+      group = choices.FirstOrDefault(g => string.Equals(g, Clean(dto.Group), StringComparison.OrdinalIgnoreCase));
+      if (group is null)
+      {
+        return (new ListResult(ListOutcome.Invalid, $"Group must be one of: {string.Join(", ", choices)}."), null, null, null);
+      }
     }
     return await list.NameTakenAsync(db, name, exceptId)
-      ? (new ListResult(ListOutcome.Conflict, "That value is already in the list."), null, null)
-      : (null, code, name);
+      ? (new ListResult(ListOutcome.Conflict, "That value is already in the list."), null, null, null)
+      : (null, code, name, group);
   }
 
   private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

@@ -17,6 +17,10 @@ public partial class RelationshipStatus
     [Unicode(false)]
     public string? RelationshipStatusDesc { get; set; }
 
+    [StringLength(30)]
+    [Unicode(false)]
+    public string? RelationshipGroup { get; set; }
+
     [InverseProperty("RelationshipStatus")]
     public virtual ICollection<FamilyComposition> FamilyCompositions { get; set; } = new List<FamilyComposition>();
 }

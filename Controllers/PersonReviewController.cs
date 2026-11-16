@@ -52,7 +52,8 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
       groups.Count, page, pageSize, groups.Skip((page - 1) * pageSize).Take(pageSize).ToList());
   }
 
-  // confirms the records are one person, to be merged later; nothing is merged yet
+  // confirms the records are one person and which record to keep, to be merged later;
+  // nothing is merged yet. Sending it again with another keepPersonId changes the record to keep.
   [HttpPost("duplicates/same")]
   public Task<IActionResult> MarkSame(DuplicateDecisionDto dto) => DecideAsync(dto, Same);
 
@@ -84,11 +85,22 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
       return BadRequest(new { message = "These persons are no longer a possible duplicate group. Reload the list." });
     }
 
-    // changing a decision straight from same to different (or back) is allowed
-    var current = (await ReviewsAsync()).GetValueOrDefault(key)?.Decision;
-    if (action == Same && current == "same")
+    int? keep = null;
+    if (action == Same)
     {
-      return BadRequest(new { message = "This group is already marked as the same person." });
+      if (dto.KeepPersonId is not { } k || !ids.Contains(k))
+      {
+        return BadRequest(new { message = "Pick which record to keep." });
+      }
+      keep = k;
+    }
+
+    // changing a decision straight from same to different (or back) is allowed
+    var review = (await ReviewsAsync()).GetValueOrDefault(key);
+    var current = review?.Decision;
+    if (action == Same && current == "same" && review!.KeepPersonId == keep)
+    {
+      return BadRequest(new { message = $"This group is already marked as the same person, keeping #{keep}." });
     }
     if (action == NotSame && current == "different")
     {
@@ -105,7 +117,7 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
       EntityId = ids[0],
       PersonId = ids[0],
       Action = action,
-      NewValues = JsonSerializer.Serialize(new DuplicateGroupValues(ids), LogJson),
+      NewValues = JsonSerializer.Serialize(new DuplicateGroupValues(ids, keep), LogJson),
       Remark = remark,
       UserId = currentUser.Id,
       DateCreated = time.GetLocalNow().DateTime,
@@ -128,7 +140,8 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
     var latest = new Dictionary<string, DuplicateReviewDto?>();
     foreach (var a in rows)
     {
-      var ids = a.NewValues is null ? null : JsonSerializer.Deserialize<DuplicateGroupValues>(a.NewValues, LogJson)?.PersonIds;
+      var values = a.NewValues is null ? null : JsonSerializer.Deserialize<DuplicateGroupValues>(a.NewValues, LogJson);
+      var ids = values?.PersonIds;
       if (ids is null || ids.Count < 2)
       {
         continue;
@@ -138,7 +151,8 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
           a.Action == Same ? "same" : "different",
           a.Lastname is null && a.Firstname is null ? a.Username : $"{a.Lastname}, {a.Firstname}".Trim(' ', ','),
           a.DateCreated,
-          a.Remark)
+          a.Remark,
+          a.Action == Same ? values!.KeepPersonId : null)
         : null;
     }
     return latest.Where(kv => kv.Value is not null).ToDictionary(kv => kv.Key, kv => kv.Value!);

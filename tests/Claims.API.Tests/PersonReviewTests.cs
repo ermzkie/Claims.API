@@ -155,8 +155,8 @@ public class PersonReviewTests
     var (app, admin) = await StartAsync();
     await using var _ = app;
 
-    Assert.Equal(HttpStatusCode.NoContent, (await admin.PostAsJsonAsync("/api/person-review/duplicates/same", new { personIds = new[] { 20, 21 }, remark = "Same contact and mother" })).StatusCode);
-    Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync("/api/person-review/duplicates/same", new { personIds = new[] { 20, 21 } })).StatusCode);
+    Assert.Equal(HttpStatusCode.NoContent, (await admin.PostAsJsonAsync("/api/person-review/duplicates/same", new { personIds = new[] { 20, 21 }, remark = "Same contact and mother", keepPersonId = 20 })).StatusCode);
+    Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync("/api/person-review/duplicates/same", new { personIds = new[] { 20, 21 }, keepPersonId = 20 })).StatusCode);
 
     var toReview = await admin.GetFromJsonAsync<PersonReviewPageDto<DuplicateGroupDto>>("/api/person-review/duplicates");
     Assert.Equal("REYES", Assert.Single(toReview!.Items).LastName);
@@ -208,6 +208,34 @@ public class PersonReviewTests
     Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync("/api/person-review/persons/999/claims")).StatusCode);
     var frontliner = await LoginAsAsync(app, "fl", Pw);
     Assert.Equal(HttpStatusCode.Forbidden, (await frontliner.GetAsync("/api/person-review/persons/40/claims")).StatusCode);
+  }
+
+  [Fact]
+  public async Task SamePerson_NeedsTheRecordToKeep_AndItCanBeChanged()
+  {
+    var (app, admin) = await StartAsync();
+    await using var _ = app;
+
+    async Task<HttpStatusCode> Same(object body) =>
+      (await admin.PostAsJsonAsync("/api/person-review/duplicates/same", body)).StatusCode;
+    async Task<DuplicateReviewDto> Review() =>
+      Assert.Single((await admin.GetFromJsonAsync<PersonReviewPageDto<DuplicateGroupDto>>("/api/person-review/duplicates?decision=same"))!.Items).Review!;
+
+    Assert.Equal(HttpStatusCode.BadRequest, await Same(new { personIds = new[] { 20, 21 } }));
+    Assert.Equal(HttpStatusCode.BadRequest, await Same(new { personIds = new[] { 20, 21 }, keepPersonId = 30 }));
+
+    Assert.Equal(HttpStatusCode.NoContent, await Same(new { personIds = new[] { 20, 21 }, keepPersonId = 21 }));
+    Assert.Equal(21, (await Review()).KeepPersonId);
+
+    // same record again is refused, another one changes it
+    Assert.Equal(HttpStatusCode.BadRequest, await Same(new { personIds = new[] { 20, 21 }, keepPersonId = 21 }));
+    Assert.Equal(HttpStatusCode.NoContent, await Same(new { personIds = new[] { 20, 21 }, keepPersonId = 20 }));
+    Assert.Equal(20, (await Review()).KeepPersonId);
+
+    await using var db = app.CreateDbContext();
+    var last = db.AuditLogs.Where(a => a.Entity == "DuplicateGroup").OrderBy(a => a.AuditLogId).ToList().Last();
+    Assert.Contains("\"keepPersonId\":20", last.NewValues);
+    Assert.True(db.People.Where(p => p.PersonId == 20 || p.PersonId == 21).All(p => p.Status));
   }
 
   [Fact]

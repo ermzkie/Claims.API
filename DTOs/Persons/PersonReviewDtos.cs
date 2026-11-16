@@ -22,13 +22,15 @@ public record DuplicateGroupDto(
   IReadOnlyList<PersonReviewRowDto> Persons,
   DuplicateReviewDto? Review);
 
-// set when the group was marked; Decision is "same" or "different"
-public record DuplicateReviewDto(string Decision, string? By, DateTime At, string? Remark);
+// set when the group was marked; Decision is "same" or "different".
+// KeepPersonId is the record the others will be merged into (same only)
+public record DuplicateReviewDto(string Decision, string? By, DateTime At, string? Remark, int? KeepPersonId);
 
-public record DuplicateDecisionDto(IReadOnlyList<int>? PersonIds, string? Remark);
+// KeepPersonId is required when marking the same person
+public record DuplicateDecisionDto(IReadOnlyList<int>? PersonIds, string? Remark, int? KeepPersonId = null);
 
 // stored in AuditLog.NewValues
-public record DuplicateGroupValues(IReadOnlyList<int> PersonIds);
+public record DuplicateGroupValues(IReadOnlyList<int> PersonIds, int? KeepPersonId = null);
 
 // Role is "patient" or "representative"; OtherPerson is the one on the other side of the claim
 public record PersonReviewClaimDto(

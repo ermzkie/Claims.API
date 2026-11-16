@@ -348,7 +348,8 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       f.FamilyPerson.Birthdate,
       f.FamilyPerson.CivilStatus != null ? f.FamilyPerson.CivilStatus.CivilStatusDesc : null,
       f.FamilyPerson.EstimatedMonthlyIncome,
-      f.FamilyPerson.ContactNo));
+      f.FamilyPerson.ContactNo,
+      f.FamilyPerson.SkillOccupation));
 
   // reverse links: who lists this person as family
   private static IQueryable<FamilyMemberDto> FamilyOfProjection(IQueryable<FamilyComposition> query) =>
@@ -365,7 +366,8 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       f.Person.Birthdate,
       f.Person.CivilStatus != null ? f.Person.CivilStatus.CivilStatusDesc : null,
       f.Person.EstimatedMonthlyIncome,
-      f.Person.ContactNo));
+      f.Person.ContactNo,
+      f.Person.SkillOccupation));
 
   private const string FamilyEntity = "FamilyComposition";
   private const int MaxRemark = 500;

@@ -47,7 +47,8 @@ public record FamilyMemberDto(
   DateOnly? Birthdate = null,
   string? CivilStatus = null,
   decimal? EstimatedMonthlyIncome = null,
-  string? ContactNo = null);
+  string? ContactNo = null,
+  string? SkillOccupation = null);
 
 // Search filters; all are optional and combine with each other and with the search text.
 public class PersonSearchDto

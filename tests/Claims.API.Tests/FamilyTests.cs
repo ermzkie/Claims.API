@@ -30,7 +30,7 @@ public class FamilyTests
         new Person
         {
           PersonId = Juan, FirstName = "JUAN", LastName = "SANTOS", Status = true, SexId = 1,
-          Birthdate = new DateOnly(2001, 4, 2), CivilStatusId = 1, EstimatedMonthlyIncome = 8000m, ContactNo = "09171234567",
+          Birthdate = new DateOnly(2001, 4, 2), CivilStatusId = 1, EstimatedMonthlyIncome = 8000m, ContactNo = "09171234567", SkillOccupation = "FARMER",
         },
         new Person { PersonId = Ana, FirstName = "ANA", LastName = "SANTOS", Status = true },
         new Person { PersonId = Gone, FirstName = "OLD", LastName = "RECORD", Status = false });
@@ -84,6 +84,7 @@ public class FamilyTests
     Assert.Equal("Single", member.GetProperty("civilStatus").GetString());
     Assert.Equal(8000m, member.GetProperty("estimatedMonthlyIncome").GetDecimal());
     Assert.Equal("09171234567", member.GetProperty("contactNo").GetString());
+    Assert.Equal("FARMER", member.GetProperty("skillOccupation").GetString());
 
     var juan = JsonDocument.Parse(await client.GetStringAsync($"/api/persons/{Juan}")).RootElement;
     Assert.Equal(0, juan.GetProperty("family").GetArrayLength());

@@ -123,17 +123,13 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       return null;
     }
 
-    var family = await db.FamilyCompositions.AsNoTracking()
-      .Where(f => f.PersonId == id && f.Status)
-      .OrderBy(f => f.FamilyCompId)
-      .Select(f => new FamilyMemberDto(
-        f.FamilyCompId,
-        f.FamilyPersonId,
-        f.FamilyPerson!.FirstName,
-        f.FamilyPerson.MiddleName,
-        f.FamilyPerson.LastName,
-        f.RelationshipStatusId,
-        f.RelationshipStatus!.RelationshipStatusDesc))
+    var family = await FamilyMemberProjection(db.FamilyCompositions.AsNoTracking()
+        .Where(f => f.PersonId == id && f.Status && f.FamilyPerson!.Status)
+        .OrderBy(f => f.FamilyCompId))
+      .ToListAsync();
+    var familyOf = await FamilyOfProjection(db.FamilyCompositions.AsNoTracking()
+        .Where(f => f.FamilyPersonId == id && f.Status && f.Person.Status)
+        .OrderBy(f => f.FamilyCompId))
       .ToListAsync();
 
     var place = person.BarangayId is { } barangayId
@@ -144,6 +140,7 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       : null;
 
     var dto = ToDto(person, family);
+    dto.FamilyOf = familyOf;
     dto.CityMunicipalityId = place?.CityMunicipalityId;
     dto.ProvinceId = place?.ProvinceId;
     return dto;
@@ -220,11 +217,11 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
 
   public async Task<FamilyMemberResult> AddFamilyMemberAsync(int actorId, int personId, SaveFamilyMemberDto dto)
   {
-    if (!await db.People.AnyAsync(p => p.PersonId == personId))
+    if (!await db.People.AnyAsync(p => p.PersonId == personId && p.Status))
     {
       return new FamilyMemberResult(PersonOutcome.NotFound, "Person not found.");
     }
-    var error = await ValidateFamilyMemberAsync(dto);
+    var error = await ValidateFamilyMemberAsync(personId, dto, exceptFamilyCompId: null);
     if (error is not null)
     {
       return new FamilyMemberResult(PersonOutcome.Invalid, error);
@@ -256,7 +253,7 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       return new FamilyMemberResult(PersonOutcome.NotFound, "Family member not found.");
     }
 
-    var error = await ValidateFamilyMemberAsync(dto);
+    var error = await ValidateFamilyMemberAsync(personId, dto, exceptFamilyCompId: familyCompId);
     if (error is not null)
     {
       return new FamilyMemberResult(PersonOutcome.Invalid, error);
@@ -273,16 +270,46 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
     return new FamilyMemberResult(PersonOutcome.Ok, FamilyMember: familyMember);
   }
 
-  private async Task<string?> ValidateFamilyMemberAsync(SaveFamilyMemberDto dto)
+  // soft delete (status false)
+  public async Task<FamilyMemberResult> RemoveFamilyMemberAsync(int actorId, int personId, int familyCompId)
   {
-    if (!await db.People.AnyAsync(p => p.PersonId == dto.FamilyPersonId))
+    var familyComposition = await db.FamilyCompositions.FirstOrDefaultAsync(f =>
+      f.PersonId == personId && f.FamilyCompId == familyCompId && f.Status);
+    if (familyComposition is null)
+    {
+      return new FamilyMemberResult(PersonOutcome.NotFound, "Family member not found.");
+    }
+
+    familyComposition.Status = false;
+    familyComposition.LastUpdatedBy = actorId;
+    familyComposition.DateLastUpdated = Now();
+    await db.SaveChangesAsync();
+    return new FamilyMemberResult(PersonOutcome.Ok);
+  }
+
+  private async Task<string?> ValidateFamilyMemberAsync(int personId, SaveFamilyMemberDto dto, int? exceptFamilyCompId)
+  {
+    if (dto.RelationshipStatusId is not { } relationshipStatusId)
+    {
+      return "Choose the relationship.";
+    }
+    if (!await db.RelationshipStatuses.AnyAsync(r => r.RelationshipStatusId == relationshipStatusId))
+    {
+      return "Relationship status not found.";
+    }
+    if (!await db.People.AnyAsync(p => p.PersonId == dto.FamilyPersonId && p.Status))
     {
       return "Family person not found.";
     }
-    if (dto.RelationshipStatusId is { } relationshipStatusId
-      && !await db.RelationshipStatuses.AnyAsync(r => r.RelationshipStatusId == relationshipStatusId))
+    if (dto.FamilyPersonId == personId)
     {
-      return "Relationship status not found.";
+      return "A person can't be listed as their own family member.";
+    }
+    if (await db.FamilyCompositions.AnyAsync(f =>
+          f.PersonId == personId && f.FamilyPersonId == dto.FamilyPersonId && f.Status
+          && f.FamilyCompId != exceptFamilyCompId))
+    {
+      return "This person is already listed as a family member.";
     }
     return null;
   }
@@ -295,7 +322,30 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       f.FamilyPerson.MiddleName,
       f.FamilyPerson.LastName,
       f.RelationshipStatusId,
-      f.RelationshipStatus!.RelationshipStatusDesc));
+      f.RelationshipStatus!.RelationshipStatusDesc,
+      f.RelationshipStatus.RelationshipGroup,
+      f.FamilyPerson.Sex != null ? f.FamilyPerson.Sex.SexDesc : f.FamilyPerson.Gender,
+      f.FamilyPerson.Birthdate,
+      f.FamilyPerson.CivilStatus != null ? f.FamilyPerson.CivilStatus.CivilStatusDesc : null,
+      f.FamilyPerson.EstimatedMonthlyIncome,
+      f.FamilyPerson.ContactNo));
+
+  // reverse links: who lists this person as family
+  private static IQueryable<FamilyMemberDto> FamilyOfProjection(IQueryable<FamilyComposition> query) =>
+    query.Select(f => new FamilyMemberDto(
+      f.FamilyCompId,
+      f.PersonId,
+      f.Person.FirstName,
+      f.Person.MiddleName,
+      f.Person.LastName,
+      f.RelationshipStatusId,
+      f.RelationshipStatus!.RelationshipStatusDesc,
+      f.RelationshipStatus.RelationshipGroup,
+      f.Person.Sex != null ? f.Person.Sex.SexDesc : f.Person.Gender,
+      f.Person.Birthdate,
+      f.Person.CivilStatus != null ? f.Person.CivilStatus.CivilStatusDesc : null,
+      f.Person.EstimatedMonthlyIncome,
+      f.Person.ContactNo));
 
   // Validates and copies the DTO onto the entity. Returns an error message, or null when valid.
   private async Task<string?> ApplyAsync(Person person, SavePersonDto dto)

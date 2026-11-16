@@ -206,10 +206,13 @@ pages added to `routes.js` are protected automatically.
 | POST / PUT / DELETE | `/api/natureofservice[/{id}]`    | Admin / Super Admin | `{ natureDesc }`                                                                              |
 | GET                 | `/api/lookups/{list}`            | logged in           | Dropdown values `[{ id, code, name }]`: `sexes`, `civil-statuses`, `name-suffixes`, `relationship-statuses`, `modes-of-assistance`, `sources-of-assistance`, `provinces`, `cities?provinceId=`, `barangays?cityMunicipalityId=` |
 | GET                 | `/api/persons`                   | logged in           | Search, paged: `{ items, total, page, pageSize }`. Query: `search`, `cityMunicipalityId`, `barangayId`, `sexId`, `sector` (repeatable), `page`, `pageSize` (max 100) |
-| GET                 | `/api/persons/{id}`              | logged in           | One person with `family` and the barangay's `cityMunicipalityId` / `provinceId`                |
+| GET                 | `/api/persons/{id}`              | logged in           | One person with `family` (members with relationship, group, sex, birthdate, civil status, income, contact), `familyOf` (people who list this person as family) and the barangay's `cityMunicipalityId` / `provinceId` |
 | GET                 | `/api/persons/{id}/transactions` | logged in           | Paged transaction history where the person is the patient or representative; query: `page` (10 items per page) |
 | POST                | `/api/persons`                   | logged in           | Create (201 with the person). Body below                                                      |
 | PUT                 | `/api/persons/{id}`              | logged in           | Replace **all** fields (send the whole person, not only what changed)                         |
+| POST                | `/api/persons/{id}/family`       | logged in           | Add a family member `{ familyPersonId, relationshipStatusId }` (201). Relationship required; no self links or duplicates |
+| PUT                 | `/api/persons/{id}/family/{familyCompId}` | logged in | Change the member or relationship, same body |
+| DELETE              | `/api/persons/{id}/family/{familyCompId}` | logged in | Remove a family member (204) |
 
 Role IDs: 1 Super Administrator, 2 Administrator, 3 Frontliner, 4 Social Worker.
 Administrators can only manage Frontliner and Social Worker accounts. Nobody can give the Super

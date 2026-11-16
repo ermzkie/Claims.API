@@ -30,6 +30,8 @@ public class PersonDto
   public decimal? EstimatedMonthlyIncome { get; set; }
   public DateTime DateCreated { get; set; }
   public IReadOnlyList<FamilyMemberDto> Family { get; set; } = [];
+  // people who list this person as family; PersonId and names are theirs
+  public IReadOnlyList<FamilyMemberDto> FamilyOf { get; set; } = [];
 }
 
 public record FamilyMemberDto(
@@ -39,7 +41,13 @@ public record FamilyMemberDto(
   string? MiddleName,
   string? LastName,
   short? RelationshipStatusId,
-  string? Relationship);
+  string? Relationship,
+  string? RelationshipGroup = null,
+  string? Sex = null,
+  DateOnly? Birthdate = null,
+  string? CivilStatus = null,
+  decimal? EstimatedMonthlyIncome = null,
+  string? ContactNo = null);
 
 // Search filters; all are optional and combine with each other and with the search text.
 public class PersonSearchDto

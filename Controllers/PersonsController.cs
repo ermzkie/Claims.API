@@ -55,6 +55,7 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
     return result.Outcome == PersonOutcome.Ok ? result.Person! : Map(result);
   }
 
+  [HttpPost("{id:int}/family")]
   [HttpPost("{id:int}/family/add")]
   public async Task<ActionResult<FamilyMemberDto>> AddFamilyMember(int id, [FromBody] SaveFamilyMemberDto dto)
   {
@@ -64,12 +65,20 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
       : Map(result);
   }
 
+  [HttpPut("{id:int}/family/{familyCompId:int}")]
   [HttpPut("{id:int}/family/{familyCompId:int}/update")]
   public async Task<ActionResult<FamilyMemberDto>> UpdateFamilyMember(
     int id, int familyCompId, [FromBody] SaveFamilyMemberDto dto)
   {
     var result = await persons.UpdateFamilyMemberAsync(currentUser.Id, id, familyCompId, dto);
     return result.Outcome == PersonOutcome.Ok ? result.FamilyMember! : Map(result);
+  }
+
+  [HttpDelete("{id:int}/family/{familyCompId:int}")]
+  public async Task<IActionResult> RemoveFamilyMember(int id, int familyCompId)
+  {
+    var result = await persons.RemoveFamilyMemberAsync(currentUser.Id, id, familyCompId);
+    return result.Outcome == PersonOutcome.Ok ? NoContent() : Map(result);
   }
 
   private ActionResult Map(PersonResult result) => result.Outcome switch

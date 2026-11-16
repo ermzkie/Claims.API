@@ -214,6 +214,9 @@ pages added to `routes.js` are protected automatically.
 | PUT                 | `/api/persons/{id}/family/{familyCompId}` | logged in | Change the member or relationship, same body |
 | DELETE              | `/api/persons/{id}/family/{familyCompId}` | logged in | Remove a family member (204), optional body `{ remark }` |
 | GET                 | `/api/persons/{id}/family/history` | logged in | Every add, change and remove, newest first: `action`, `old` / `new` (`member`, `relationship`), `remark`, `changedBy`, `date` |
+| GET                 | `/api/dashboard`                 | logged in           | Home page figures for one month. Query: `year`, `month` (default this month)                  |
+| GET                 | `/api/dashboard/beneficiaries`   | logged in           | Who the claims were for. Query: `year`, `month`, `period` = `month` (default) or `year` (January up to the month) |
+| GET                 | `/api/dashboard/budget`          | Admin / Super Admin | Released and obligated per fund source from the finance system. Query: `year`               |
 
 Role IDs: 1 Super Administrator, 2 Administrator, 3 Frontliner, 4 Social Worker.
 Administrators can only manage Frontliner and Social Worker accounts. Nobody can give the Super
@@ -257,6 +260,20 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
   returns that text as `sex`, `barangay` and `municipality`, and fills it from the IDs when a
   person is saved, so always show those fields and send the IDs. Filter and report by the IDs.
 - Validation errors come back as 400 with a `message` to show, like everything else.
+
+### Things to know about the dashboard
+
+- Claims from the old system came over with status 0 but aren't deleted, so they're counted. Only
+  claims made in this app can be deleted (status 0 with a `createdBy`).
+- **Waiting** means made in this app, not deleted and not released. Old claims have no release
+  status, so they never show as waiting. It isn't limited to the chosen month.
+- **Beneficiaries** are patients, each counted once. `firstTime` had no counted claim before the
+  period, `returning` did. Sectors can overlap, so they don't add up to the total. Age is at the
+  end of the month.
+- **Budget** is read live from the finance system (sysPFM) through `getAnnualBalance`. Only fund
+  sources linked to a finance appropriation for that year show up. If the finance server can't be
+  reached it returns 503 with a `message`; show that in the card and keep the rest of the page.
+  Claims don't record their fund source yet, so the budget can't be matched to claims.
 
 ## Rules
 

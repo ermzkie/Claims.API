@@ -55,6 +55,7 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
     return result.Outcome == PersonOutcome.Ok ? result.Person! : Map(result);
   }
 
+  [HttpPost("{id:int}/family")]
   [HttpPost("{id:int}/family/add")]
   public async Task<ActionResult<FamilyMemberDto>> AddFamilyMember(int id, [FromBody] SaveFamilyMemberDto dto)
   {
@@ -64,6 +65,7 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
       : Map(result);
   }
 
+  [HttpPut("{id:int}/family/{familyCompId:int}")]
   [HttpPut("{id:int}/family/{familyCompId:int}/update")]
   public async Task<ActionResult<FamilyMemberDto>> UpdateFamilyMember(
     int id, int familyCompId, [FromBody] SaveFamilyMemberDto dto)
@@ -71,6 +73,21 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
     var result = await persons.UpdateFamilyMemberAsync(currentUser.Id, id, familyCompId, dto);
     return result.Outcome == PersonOutcome.Ok ? result.FamilyMember! : Map(result);
   }
+
+  [HttpDelete("{id:int}/family/{familyCompId:int}")]
+  public async Task<IActionResult> RemoveFamilyMember(
+    int id, int familyCompId, [FromBody] RemoveFamilyMemberDto? dto = null)
+  {
+    var result = await persons.RemoveFamilyMemberAsync(currentUser.Id, id, familyCompId, dto?.Remark);
+    return result.Outcome == PersonOutcome.Ok ? NoContent() : Map(result);
+  }
+
+  // family change log, newest first
+  [HttpGet("{id:int}/family/history")]
+  public async Task<ActionResult<List<FamilyChangeDto>>> FamilyHistory(int id) =>
+    await persons.FamilyHistoryAsync(id) is { } history
+      ? history
+      : NotFound(new { message = "Person not found." });
 
   private ActionResult Map(PersonResult result) => result.Outcome switch
   {

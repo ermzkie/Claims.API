@@ -58,7 +58,7 @@ public class PersonTests
   private static async Task<int> SeedLegacyAsync(ClaimsApiFactory app, string first, string last, string? barangay = null)
   {
     await using var db = app.CreateDbContext();
-    var p = new Person { FirstName = first, LastName = last, Gender = "Female", Barangay = barangay, Municipality = "Banga" };
+    var p = new Person { Status = true, FirstName = first, LastName = last, Gender = "Female", Barangay = barangay, Municipality = "Banga" };
     db.People.Add(p);
     await db.SaveChangesAsync();
     return p.PersonId;

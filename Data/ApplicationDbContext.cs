@@ -17,6 +17,8 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<Assistance> Assistances { get; set; }
 
+    public virtual DbSet<AuditLog> AuditLogs { get; set; }
+
     public virtual DbSet<Barangay> Barangays { get; set; }
 
     public virtual DbSet<CityMunicipality> CityMunicipalities { get; set; }
@@ -70,6 +72,15 @@ public partial class ApplicationDbContext : DbContext
         {
             entity.Property(e => e.AssistanceId).ValueGeneratedOnAdd();
             entity.Property(e => e.IsActive).HasDefaultValue(true, "DF_Assistance_isActive");
+        });
+
+        modelBuilder.Entity<AuditLog>(entity =>
+        {
+            entity.Property(e => e.DateCreated).HasDefaultValueSql("(getdate())", "DF_AuditLog_DateCreated");
+
+            entity.HasOne(d => d.User).WithMany(p => p.AuditLogs)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_AuditLog_User");
         });
 
         modelBuilder.Entity<Barangay>(entity =>

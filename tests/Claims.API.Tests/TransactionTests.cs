@@ -117,26 +117,87 @@ public class TransactionTests
   }
 
   [Fact]
-  public async Task GetAll_IncludesLinkedPatientAndRepresentativeNames()
+  public async Task SaveTransaction_AssignsQueueNumbersAndResetsTheNextDay()
   {
     await using var app = new ClaimsApiFactory();
     await SeedRolesAsync(app);
     await CreateUserAsync(app, "worker", Password, "Frontliner");
     using var client = await LoginAsAsync(app, "worker", Password);
 
+    var today = app.Clock.GetUtcNow().UtcDateTime.AddHours(8).Date;
     await using (var db = app.CreateDbContext())
     {
+      db.Transactions.Add(new Transaction
+      {
+        QueueNo = 25,
+        DateCreated = today.AddDays(-1).AddHours(12),
+        Status = true,
+      });
+      await db.SaveChangesAsync();
+    }
+
+    var firstResponse = await client.PostAsJsonAsync("/api/transactions/save", new { refNo = "QUEUE-1" });
+    var first = await firstResponse.Content.ReadFromJsonAsync<TransactionResponseDto>();
+    var secondResponse = await client.PostAsJsonAsync("/api/transactions/save", new { refNo = "QUEUE-2" });
+    var second = await secondResponse.Content.ReadFromJsonAsync<TransactionResponseDto>();
+
+    Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
+    Assert.Equal(HttpStatusCode.Created, secondResponse.StatusCode);
+    Assert.Equal((short)1, first!.QueueNo);
+    Assert.Equal((short)2, second!.QueueNo);
+
+    app.Clock.Advance(TimeSpan.FromDays(1));
+    using var nextDayClient = await LoginAsAsync(app, "worker", Password);
+    var nextDayResponse = await nextDayClient.PostAsJsonAsync(
+      "/api/transactions/save",
+      new { refNo = "QUEUE-NEXT-DAY" });
+    Assert.Equal(HttpStatusCode.Created, nextDayResponse.StatusCode);
+    var nextDay = await nextDayResponse.Content.ReadFromJsonAsync<TransactionResponseDto>();
+
+    Assert.Equal((short)1, nextDay!.QueueNo);
+
+    var updateResponse = await nextDayClient.PostAsJsonAsync("/api/transactions/save", new
+    {
+      transactionId = first.TransactionId,
+      refNo = "QUEUE-1-UPDATED",
+    });
+    var updated = await nextDayClient.GetFromJsonAsync<TransactionResponseDto>(
+      $"/api/transactions/{first.TransactionId}");
+
+    Assert.Equal(HttpStatusCode.NoContent, updateResponse.StatusCode);
+    Assert.Equal((short)1, updated!.QueueNo);
+  }
+
+  [Fact]
+  public async Task GetAll_IncludesLinkedPatientAndRepresentativeNames()
+  {
+    await using var app = new ClaimsApiFactory();
+    await SeedRolesAsync(app);
+    var userId = await CreateUserAsync(app, "worker", Password, "Frontliner");
+    using var client = await LoginAsAsync(app, "worker", Password);
+
+    int transactionId;
+    await using (var db = app.CreateDbContext())
+    {
+      var worker = await db.Users.SingleAsync(user => user.UserId == userId);
+      worker.Firstname = "Ana";
+      worker.Middlename = "Maria";
+      worker.Lastname = "Santos";
+
       var patient = new Person { FirstName = "Maria", LastName = "Santos", Status = true };
       var representative = new Person { FirstName = "Juan", MiddleName = "Dela", LastName = "Cruz", Status = true };
       db.People.AddRange(patient, representative);
       await db.SaveChangesAsync();
-      db.Transactions.Add(new Transaction
+      var newTransaction = new Transaction
       {
         PatientPersonId = patient.PersonId,
         RepresentativePersonId = representative.PersonId,
+        SocialWorkerUserId = userId,
         Status = true,
-      });
+      };
+      db.Transactions.Add(newTransaction);
       await db.SaveChangesAsync();
+      transactionId = newTransaction.TransactionId;
     }
 
     var result = await client.GetFromJsonAsync<PagedResult<TransactionResponseDto>>("/api/transactions");
@@ -145,5 +206,52 @@ public class TransactionTests
     var transaction = Assert.Single(result.Items);
     Assert.Equal("Maria Santos", transaction.PatientPersonName);
     Assert.Equal("Juan Dela Cruz", transaction.RepresentativePersonName);
+    Assert.Equal("Ana Maria Santos", transaction.SocialWorkerUserFullName);
+
+    var detail = await client.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{transactionId}");
+    Assert.Equal("Ana Maria Santos", detail!.SocialWorkerUserFullName);
+  }
+
+  [Fact]
+  public async Task CheckoutTransaction_AssignsCurrentUserAndReturnsTransaction()
+  {
+    await using var app = new ClaimsApiFactory();
+    await SeedRolesAsync(app);
+    var userId = await CreateUserAsync(app, "worker", Password, "Frontliner");
+    using var client = await LoginAsAsync(app, "worker", Password);
+
+    int transactionId;
+    await using (var db = app.CreateDbContext())
+    {
+      var worker = await db.Users.SingleAsync(user => user.UserId == userId);
+      worker.Firstname = "Ana";
+      worker.Middlename = "Maria";
+      worker.Lastname = "Santos";
+
+      var transaction = new Transaction { Status = true };
+      db.Transactions.Add(transaction);
+      await db.SaveChangesAsync();
+      transactionId = transaction.TransactionId;
+    }
+
+    var response = await client.PostAsJsonAsync(
+      "/api/transactions/checkout-social-worker",
+      new { transactionId });
+
+    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    var result = await response.Content.ReadFromJsonAsync<TransactionResponseDto>();
+    Assert.NotNull(result);
+    Assert.Equal(userId, result.SocialWorkerUserId);
+    Assert.Equal("Ana Maria Santos", result.SocialWorkerUserFullName);
+
+    await using var verify = app.CreateDbContext();
+    var saved = await verify.Transactions.SingleAsync(item => item.TransactionId == transactionId);
+    Assert.Equal(userId, saved.SocialWorkerUserId);
+    Assert.Equal(app.Clock.GetUtcNow().UtcDateTime.AddHours(8), saved.DateLastUpdated);
+
+    var missing = await client.PostAsJsonAsync(
+      "/api/transactions/checkout-social-worker",
+      new { transactionId = int.MaxValue });
+    Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
   }
 }

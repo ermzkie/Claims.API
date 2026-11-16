@@ -1,3 +1,4 @@
+using System.Data;
 using Claims.API.Auth;
 using Claims.API.Data;
 using Claims.API.DTOs.Common;
@@ -11,7 +12,10 @@ namespace Claims.API.Controllers;
 
 [Route("api/transactions")]
 [ApiController]
-public class TransactionsController(ApplicationDbContext context, ICurrentUser currentUser) : ControllerBase
+public class TransactionsController(
+  ApplicationDbContext context,
+  ICurrentUser currentUser,
+  TimeProvider time) : ControllerBase
 {
   [HttpGet]
   public async Task<ActionResult<PagedResult<TransactionResponseDto>>> GetAll(
@@ -106,6 +110,7 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
         .Include(x => x.TransactionServices)
         .Include(x => x.PatientPerson)
         .Include(x => x.RepresentativePerson)
+        .Include(x => x.SocialWorkerUser)
         .Skip((parameters.Page - 1) * pageSize)
         .Take(pageSize)
         .ToListAsync();
@@ -129,6 +134,7 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
       .Include(x => x.TransactionServices)
       .Include(x => x.PatientPerson)
       .Include(x => x.RepresentativePerson)
+      .Include(x => x.SocialWorkerUser)
       .Where(x => x.TransactionId == id)
       .FirstOrDefaultAsync();
 
@@ -138,22 +144,37 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
   }
 
   [HttpPost("save")]
-  public async Task<ActionResult<TransactionResponseDto>> SaveTransaction(SaveTransactionDto dto)
+  public async Task<ActionResult<TransactionResponseDto>> SaveTransaction(
+    SaveTransactionDto dto,
+    CancellationToken cancellationToken)
   {
-    var now = DateTime.UtcNow.AddHours(8);
+    var now = time.GetUtcNow().UtcDateTime.AddHours(8);
     var transaction = dto.TransactionId.HasValue
       ? await context.Transactions
         .Include(x => x.TransactionServices)
-        .FirstOrDefaultAsync(x => x.TransactionId == dto.TransactionId.Value)
+        .Include(x => x.SocialWorkerUser)
+        .FirstOrDefaultAsync(x => x.TransactionId == dto.TransactionId.Value, cancellationToken)
       : null;
     var isNew = transaction is null;
 
+    await using var dbTransaction = isNew || dto.NatureIds is not null
+      ? await context.Database.BeginTransactionAsync(
+        isNew ? IsolationLevel.Serializable : IsolationLevel.ReadCommitted,
+        cancellationToken)
+      : null;
+
     if (transaction is null)
     {
+      var queueDate = now.Date;
+      var lastQueueNo = await context.Transactions
+        .Where(x => x.DateCreated >= queueDate && x.DateCreated < queueDate.AddDays(1))
+        .MaxAsync(x => x.QueueNo, cancellationToken);
+
       transaction = new Transaction
       {
         IsReleased = false,
         Status = true,
+        QueueNo = checked((short)((lastQueueNo ?? 0) + 1)),
         CreatedBy = currentUser.Id,
         DateCreated = now,
       };
@@ -167,13 +188,9 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
         transaction.IsReleased = dto.IsReleased.Value;
     }
 
-    transaction.AssistanceCode = dto.AssistanceCode;
-    transaction.RefNo = dto.RefNo;
-    transaction.SocialWorkerId = dto.SocialWorkerId;
     transaction.Date = dto.Date;
     transaction.PatientPersonId = dto.PatientPersonId;
     transaction.RepresentativePersonId = dto.RepresentativePersonId;
-    transaction.Representative = dto.Representative;
     transaction.FundSourceId = dto.FundSourceId;
     transaction.CreditorId = dto.CreditorId;
     transaction.ModeId = dto.ModeId;
@@ -183,12 +200,11 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
 
     if (dto.NatureIds is null)
     {
-      await context.SaveChangesAsync();
+      await context.SaveChangesAsync(cancellationToken);
     }
     else
     {
-      await using var dbTransaction = await context.Database.BeginTransactionAsync();
-      await context.SaveChangesAsync();
+      await context.SaveChangesAsync(cancellationToken);
 
       var natureIds = dto.NatureIds.Distinct().ToHashSet();
       foreach (var service in transaction.TransactionServices.ToList())
@@ -207,13 +223,39 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
         });
       }
 
-      await context.SaveChangesAsync();
-      await dbTransaction.CommitAsync();
+      await context.SaveChangesAsync(cancellationToken);
     }
+
+    if (dbTransaction is not null)
+      await dbTransaction.CommitAsync(cancellationToken);
 
     return isNew
       ? CreatedAtAction(nameof(GetById), new { id = transaction.TransactionId }, TransactionResponseMapper.ToResponse(transaction))
       : NoContent();
+  }
+
+  [HttpPost("{id:int}/checkout-social-worker")]
+  public async Task<ActionResult<TransactionResponseDto>> CheckoutTransaction(int id, CancellationToken cancellationToken)
+  {
+    var transaction = await context.Transactions
+      .Include(x => x.TransactionServices)
+      .Include(x => x.PatientPerson)
+      .Include(x => x.RepresentativePerson)
+      .Include(x => x.SocialWorkerUser)
+      .FirstOrDefaultAsync(x => x.TransactionId == id, cancellationToken);
+
+    if (transaction is null)
+      return NotFound(new { message = "Transaction not found." });
+
+    transaction.SocialWorkerUserId = currentUser.Id;
+    transaction.DateLastUpdated = time.GetUtcNow().UtcDateTime.AddHours(8);
+
+    await context.SaveChangesAsync(cancellationToken);
+    await context.Entry(transaction)
+      .Reference(x => x.SocialWorkerUser)
+      .LoadAsync(cancellationToken);
+
+    return Ok(TransactionResponseMapper.ToResponse(transaction));
   }
 
   [HttpDelete("{id:int}")]

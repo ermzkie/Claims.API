@@ -17,6 +17,8 @@ public partial class Transaction
     [Unicode(false)]
     public string? AssistanceCode { get; set; }
 
+    public short? QueueNo { get; set; }
+
     [StringLength(50)]
     [Unicode(false)]
     public string? RefNo { get; set; }

@@ -4,18 +4,25 @@ public class TransactionResponseDto
 {
   public int TransactionId { get; set; }
   public string? AssistanceCode { get; set; }
+  public short? QueueNo { get; set; }
   public string? RefNo { get; set; }
-  public string? SocialWorkerId { get; set; }
   public DateTime? Date { get; set; }
+  public short? LaneTypeId { get; set; }
+  public string? LaneTypeDesc { get; set; }
   public int? PatientPersonId { get; set; }
   public string? PatientPersonName { get; set; }
   public int? RepresentativePersonId { get; set; }
   public string? RepresentativePersonName { get; set; }
   public string? Representative { get; set; }
   public int? FundSourceId { get; set; }
+  public string? SourceDesc { get; set; }
   public int? CreditorId { get; set; }
+  public string? CreditorName { get; set; }
   public short? ModeId { get; set; }
+  public string? ModeDesc { get; set; }
   public decimal? Amount { get; set; }
+  public int? SocialWorkerUserId { get; set; }
+  public string? SocialWorkerUserFullName { get; set; }
   public string? SocialWorkerAssessment { get; set; }
   public string? Remarks { get; set; }
   public bool? IsReleased { get; set; }
@@ -24,6 +31,5 @@ public class TransactionResponseDto
   public DateTime? DateCreated { get; set; }
   public int? LastUpdatedBy { get; set; }
   public DateTime? DateLastUpdated { get; set; }
-  public int? SocialWorkerUserId { get; set; }
   public List<short> NatureIds { get; set; } = [];
 }

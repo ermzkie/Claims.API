@@ -17,6 +17,8 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<Assistance> Assistances { get; set; }
 
+    public virtual DbSet<AuditLog> AuditLogs { get; set; }
+
     public virtual DbSet<Barangay> Barangays { get; set; }
 
     public virtual DbSet<CityMunicipality> CityMunicipalities { get; set; }
@@ -28,6 +30,8 @@ public partial class ApplicationDbContext : DbContext
     public virtual DbSet<FamilyComposition> FamilyCompositions { get; set; }
 
     public virtual DbSet<FundSource> FundSources { get; set; }
+
+    public virtual DbSet<LaneType> LaneTypes { get; set; }
 
     public virtual DbSet<ModeOfAssistance> ModeOfAssistances { get; set; }
 
@@ -70,6 +74,15 @@ public partial class ApplicationDbContext : DbContext
         {
             entity.Property(e => e.AssistanceId).ValueGeneratedOnAdd();
             entity.Property(e => e.IsActive).HasDefaultValue(true, "DF_Assistance_isActive");
+        });
+
+        modelBuilder.Entity<AuditLog>(entity =>
+        {
+            entity.Property(e => e.DateCreated).HasDefaultValueSql("(getdate())", "DF_AuditLog_DateCreated");
+
+            entity.HasOne(d => d.User).WithMany(p => p.AuditLogs)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_AuditLog_User");
         });
 
         modelBuilder.Entity<Barangay>(entity =>
@@ -175,6 +188,8 @@ public partial class ApplicationDbContext : DbContext
             entity.HasOne(d => d.Creditor).WithMany(p => p.Transactions).HasConstraintName("FK_Transactions_Creditor");
 
             entity.HasOne(d => d.FundSource).WithMany(p => p.Transactions).HasConstraintName("FK_Transactions_FundSource");
+
+            entity.HasOne(d => d.LaneType).WithMany(p => p.Transactions).HasConstraintName("FK_Transactions_LaneType");
 
             entity.HasOne(d => d.Mode).WithMany(p => p.Transactions).HasConstraintName("FK_Transactions_ModeOfAssistance");
 

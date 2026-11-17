@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Claims.API.DTOs.Common;
+using Claims.API.DTOs.Transactions;
 using Claims.API.Models;
 using Claims.API.Tests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
@@ -56,7 +58,7 @@ public class PersonTests
   private static async Task<int> SeedLegacyAsync(ClaimsApiFactory app, string first, string last, string? barangay = null)
   {
     await using var db = app.CreateDbContext();
-    var p = new Person { FirstName = first, LastName = last, Gender = "Female", Barangay = barangay, Municipality = "Banga" };
+    var p = new Person { Status = true, FirstName = first, LastName = last, Gender = "Female", Barangay = barangay, Municipality = "Banga" };
     db.People.Add(p);
     await db.SaveChangesAsync();
     return p.PersonId;
@@ -260,6 +262,76 @@ public class PersonTests
       Assert.Equal("Poblacion", found.GetProperty("barangay").GetString());
       Assert.Equal(0, found.GetProperty("family").GetArrayLength());
       Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+    }
+  }
+
+  [Fact]
+  public async Task GetTransactionHistory_IncludesPatientAndRepresentativeTransactionsInNewestFirstOrder()
+  {
+    var (app, client, userId) = await StartAsync();
+    await using (app)
+    {
+      var personId = await SeedLegacyAsync(app, "Maria", "Santos");
+      var otherPersonId = await SeedLegacyAsync(app, "Juan", "Cruz");
+      await using (var db = app.CreateDbContext())
+      {
+        var worker = await db.Users.SingleAsync(user => user.UserId == userId);
+        worker.Firstname = "Pedro";
+        worker.Lastname = "Reyes";
+        db.Transactions.AddRange(
+          new Transaction
+          {
+            PatientPersonId = personId,
+            SocialWorkerUserId = userId,
+            Date = new DateTime(2026, 1, 1),
+            RefNo = "PATIENT",
+            Status = true,
+          },
+          new Transaction
+          {
+            RepresentativePersonId = personId,
+            PatientPersonId = otherPersonId,
+            Date = new DateTime(2026, 2, 1),
+            RefNo = "REPRESENTATIVE",
+            Status = true,
+          },
+          new Transaction
+          {
+            PatientPersonId = otherPersonId,
+            Date = new DateTime(2026, 3, 1),
+            RefNo = "UNRELATED",
+            Status = true,
+          });
+        await db.SaveChangesAsync();
+      }
+
+      var result = await client.GetFromJsonAsync<PagedResult<TransactionResponseDto>>(
+        $"/api/persons/{personId}/transactions");
+
+      Assert.NotNull(result);
+      Assert.Equal(2, result.Total);
+      Assert.Equal(1, result.Page);
+      Assert.Equal(10, result.PageSize);
+      Assert.Equal(
+        ["REPRESENTATIVE", "PATIENT"],
+        result.Items.Select(transaction => transaction.RefNo));
+      Assert.Equal(
+        "Pedro Reyes",
+        result.Items.Single(transaction => transaction.RefNo == "PATIENT").SocialWorkerUserFullName);
+    }
+  }
+
+  [Fact]
+  public async Task GetTransactionHistory_ValidatesPersonAndPage()
+  {
+    var (app, client, _) = await StartAsync();
+    await using (app)
+    {
+      var missingPerson = await client.GetAsync("/api/persons/99999/transactions");
+      var invalidPage = await client.GetAsync("/api/persons/1/transactions?page=0");
+
+      Assert.Equal(HttpStatusCode.NotFound, missingPerson.StatusCode);
+      Assert.Equal(HttpStatusCode.BadRequest, invalidPage.StatusCode);
     }
   }
 

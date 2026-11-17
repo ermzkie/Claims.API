@@ -1,5 +1,6 @@
 using Claims.API.Data;
 using Claims.API.DTOs.Lookups;
+using Claims.API.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -30,12 +31,15 @@ public class LookupsController(ApplicationDbContext context) : ControllerBase
       .Select(x => new LookupItemDto(x.NameSuffixId, x.NameSuffixCode, x.NameSuffixCode ?? ""))
       .ToListAsync();
 
+  // sorted by group then id, for dropdown headings
   [HttpGet("relationship-statuses")]
   public async Task<ActionResult<List<LookupItemDto>>> RelationshipStatuses() =>
-    await context.RelationshipStatuses.AsNoTracking()
-      .OrderBy(x => x.RelationshipStatusId)
-      .Select(x => new LookupItemDto(x.RelationshipStatusId, null, x.RelationshipStatusDesc ?? ""))
-      .ToListAsync();
+    (await context.RelationshipStatuses.AsNoTracking()
+      .Select(x => new LookupItemDto(x.RelationshipStatusId, null, x.RelationshipStatusDesc ?? "", x.RelationshipGroup))
+      .ToListAsync())
+      .OrderBy(x => RelationshipGroups.Order(x.Group))
+      .ThenBy(x => x.Id)
+      .ToList();
 
   [HttpGet("modes-of-assistance")]
   public async Task<ActionResult<List<LookupItemDto>>> ModesOfAssistance() =>
@@ -84,4 +88,16 @@ public class LookupsController(ApplicationDbContext context) : ControllerBase
       .Select(x => new LookupItemDto(x.BarangayId, x.BarangayCode, x.BarangayName))
       .ToListAsync();
   }
+
+  // Assistance has one row per budget period, so one entry per code
+  [HttpGet("assistance-programs")]
+  public async Task<ActionResult<List<AssistanceProgramDto>>> AssistancePrograms() =>
+    (await context.Assistances.AsNoTracking()
+      .Where(x => x.AssistanceCode != null && x.AssistanceType != null)
+      .Select(x => new { x.AssistanceCode, x.AssistanceType })
+      .ToListAsync())
+      .GroupBy(x => x.AssistanceCode!.Trim().ToUpperInvariant())
+      .Select(g => new AssistanceProgramDto(g.Key, g.First().AssistanceType!.Trim()))
+      .OrderBy(x => x.Code)
+      .ToList();
 }

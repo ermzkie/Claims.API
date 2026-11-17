@@ -17,6 +17,11 @@ public partial class Transaction
     [Unicode(false)]
     public string? AssistanceCode { get; set; }
 
+    [Column("LaneTypeID")]
+    public short? LaneTypeId { get; set; }
+
+    public short? QueueNo { get; set; }
+
     [StringLength(50)]
     [Unicode(false)]
     public string? RefNo { get; set; }
@@ -80,6 +85,10 @@ public partial class Transaction
     [ForeignKey("FundSourceId")]
     [InverseProperty("Transactions")]
     public virtual FundSource? FundSource { get; set; }
+
+    [ForeignKey("LaneTypeId")]
+    [InverseProperty("Transactions")]
+    public virtual LaneType? LaneType { get; set; }
 
     [ForeignKey("ModeId")]
     [InverseProperty("Transactions")]

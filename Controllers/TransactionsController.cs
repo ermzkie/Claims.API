@@ -1,8 +1,10 @@
+using System.Data;
 using Claims.API.Auth;
 using Claims.API.Data;
 using Claims.API.DTOs.Common;
 using Claims.API.DTOs.Transactions;
 using Claims.API.Models;
+using Claims.API.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,7 +12,10 @@ namespace Claims.API.Controllers;
 
 [Route("api/transactions")]
 [ApiController]
-public class TransactionsController(ApplicationDbContext context, ICurrentUser currentUser) : ControllerBase
+public class TransactionsController(
+  ApplicationDbContext context,
+  ICurrentUser currentUser,
+  TimeProvider time) : ControllerBase
 {
   [HttpGet]
   public async Task<ActionResult<PagedResult<TransactionResponseDto>>> GetAll(
@@ -55,10 +60,22 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
     if (!string.IsNullOrWhiteSpace(parameters.Search))
     {
       var search = parameters.Search.Trim();
+      var namePattern = $"%{string.Join("%", search.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(EscapeLike))}%";
 
       query = query.Where(x =>
-          !string.IsNullOrEmpty(x.RefNo) &&
-          x.RefNo.Contains(search));
+          (!string.IsNullOrEmpty(x.RefNo) && x.RefNo.Contains(search))
+          || (x.PatientPerson != null && EF.Functions.Like(
+            (x.PatientPerson.FirstName ?? "") + " " +
+            (x.PatientPerson.MiddleName ?? "") + " " +
+            (x.PatientPerson.LastName ?? ""),
+            namePattern,
+            "\\"))
+          || (x.RepresentativePerson != null && EF.Functions.Like(
+            (x.RepresentativePerson.FirstName ?? "") + " " +
+            (x.RepresentativePerson.MiddleName ?? "") + " " +
+            (x.RepresentativePerson.LastName ?? ""),
+            namePattern,
+            "\\")));
     }
 
     // Count filtered records before pagination
@@ -105,13 +122,19 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
         .Include(x => x.TransactionServices)
         .Include(x => x.PatientPerson)
         .Include(x => x.RepresentativePerson)
+        .Include(x => x.SocialWorkerUser)
+        .Include(x => x.LaneType)
+        .Include(x => x.Creditor)
+        .Include(x => x.Mode)
+        .Include(x => x.FundSource)
+          .ThenInclude(x => x!.Source)
         .Skip((parameters.Page - 1) * pageSize)
         .Take(pageSize)
         .ToListAsync();
 
     // 5. Build response
     var response = new PagedResult<TransactionResponseDto>(
-      transactions.Select(ToResponse).ToList(),
+      transactions.Select(TransactionResponseMapper.ToResponse).ToList(),
       parameters.Page,
       pageSize,
       totalRecords,
@@ -128,31 +151,52 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
       .Include(x => x.TransactionServices)
       .Include(x => x.PatientPerson)
       .Include(x => x.RepresentativePerson)
+      .Include(x => x.SocialWorkerUser)
+      .Include(x => x.LaneType)
+      .Include(x => x.Creditor)
+      .Include(x => x.Mode)
+      .Include(x => x.FundSource)
+        .ThenInclude(x => x!.Source)
       .Where(x => x.TransactionId == id)
       .FirstOrDefaultAsync();
 
     return transaction is null
       ? NotFound(new { message = "Transaction not found." })
-      : Ok(ToResponse(transaction));
+      : Ok(TransactionResponseMapper.ToResponse(transaction));
   }
 
   [HttpPost("save")]
-  public async Task<ActionResult<TransactionResponseDto>> SaveTransaction(SaveTransactionDto dto)
+  public async Task<ActionResult<TransactionResponseDto>> SaveTransaction(
+    SaveTransactionDto dto,
+    CancellationToken cancellationToken)
   {
-    var now = DateTime.UtcNow.AddHours(8);
+    var now = time.GetUtcNow().UtcDateTime.AddHours(8);
     var transaction = dto.TransactionId.HasValue
       ? await context.Transactions
         .Include(x => x.TransactionServices)
-        .FirstOrDefaultAsync(x => x.TransactionId == dto.TransactionId.Value)
+        .Include(x => x.SocialWorkerUser)
+        .FirstOrDefaultAsync(x => x.TransactionId == dto.TransactionId.Value, cancellationToken)
       : null;
     var isNew = transaction is null;
 
+    await using var dbTransaction = isNew || dto.NatureIds is not null
+      ? await context.Database.BeginTransactionAsync(
+        isNew ? IsolationLevel.Serializable : IsolationLevel.ReadCommitted,
+        cancellationToken)
+      : null;
+
     if (transaction is null)
     {
+      var queueDate = now.Date;
+      var lastQueueNo = await context.Transactions
+        .Where(x => x.DateCreated >= queueDate && x.DateCreated < queueDate.AddDays(1))
+        .MaxAsync(x => x.QueueNo, cancellationToken);
+
       transaction = new Transaction
       {
         IsReleased = false,
         Status = true,
+        QueueNo = checked((short)((lastQueueNo ?? 0) + 1)),
         CreatedBy = currentUser.Id,
         DateCreated = now,
       };
@@ -166,13 +210,10 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
         transaction.IsReleased = dto.IsReleased.Value;
     }
 
-    transaction.AssistanceCode = dto.AssistanceCode;
-    transaction.RefNo = dto.RefNo;
-    transaction.SocialWorkerId = dto.SocialWorkerId;
     transaction.Date = dto.Date;
+    transaction.LaneTypeId = dto.LaneTypeId;
     transaction.PatientPersonId = dto.PatientPersonId;
     transaction.RepresentativePersonId = dto.RepresentativePersonId;
-    transaction.Representative = dto.Representative;
     transaction.FundSourceId = dto.FundSourceId;
     transaction.CreditorId = dto.CreditorId;
     transaction.ModeId = dto.ModeId;
@@ -182,12 +223,11 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
 
     if (dto.NatureIds is null)
     {
-      await context.SaveChangesAsync();
+      await context.SaveChangesAsync(cancellationToken);
     }
     else
     {
-      await using var dbTransaction = await context.Database.BeginTransactionAsync();
-      await context.SaveChangesAsync();
+      await context.SaveChangesAsync(cancellationToken);
 
       var natureIds = dto.NatureIds.Distinct().ToHashSet();
       foreach (var service in transaction.TransactionServices.ToList())
@@ -206,13 +246,61 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
         });
       }
 
-      await context.SaveChangesAsync();
-      await dbTransaction.CommitAsync();
+      await context.SaveChangesAsync(cancellationToken);
     }
 
-    return isNew
-      ? CreatedAtAction(nameof(GetById), new { id = transaction.TransactionId }, ToResponse(transaction))
-      : NoContent();
+    if (dbTransaction is not null)
+      await dbTransaction.CommitAsync(cancellationToken);
+
+    if (!isNew)
+      return NoContent();
+
+    var createdTransaction = await context.Transactions
+      .AsNoTracking()
+      .Include(x => x.TransactionServices)
+      .Include(x => x.PatientPerson)
+      .Include(x => x.RepresentativePerson)
+      .Include(x => x.SocialWorkerUser)
+      .Include(x => x.LaneType)
+      .Include(x => x.Creditor)
+      .Include(x => x.Mode)
+      .Include(x => x.FundSource)
+        .ThenInclude(x => x!.Source)
+      .SingleAsync(x => x.TransactionId == transaction.TransactionId, cancellationToken);
+
+    return CreatedAtAction(
+      nameof(GetById),
+      new { id = createdTransaction.TransactionId },
+      TransactionResponseMapper.ToResponse(createdTransaction));
+  }
+
+  [HttpPost("{id:int}/checkout-social-worker")]
+  public async Task<ActionResult<TransactionResponseDto>> CheckoutTransaction(int id, CancellationToken cancellationToken)
+  {
+    var transaction = await context.Transactions
+      .Include(x => x.TransactionServices)
+      .Include(x => x.PatientPerson)
+      .Include(x => x.RepresentativePerson)
+      .Include(x => x.SocialWorkerUser)
+      .Include(x => x.LaneType)
+      .Include(x => x.Creditor)
+      .Include(x => x.Mode)
+      .Include(x => x.FundSource)
+        .ThenInclude(x => x!.Source)
+      .FirstOrDefaultAsync(x => x.TransactionId == id, cancellationToken);
+
+    if (transaction is null)
+      return NotFound(new { message = "Transaction not found." });
+
+    transaction.SocialWorkerUserId = currentUser.Id;
+    transaction.DateLastUpdated = time.GetUtcNow().UtcDateTime.AddHours(8);
+
+    await context.SaveChangesAsync(cancellationToken);
+    await context.Entry(transaction)
+      .Reference(x => x.SocialWorkerUser)
+      .LoadAsync(cancellationToken);
+
+    return Ok(TransactionResponseMapper.ToResponse(transaction));
   }
 
   [HttpDelete("{id:int}")]
@@ -231,45 +319,6 @@ public class TransactionsController(ApplicationDbContext context, ICurrentUser c
     return NoContent();
   }
 
-  private static TransactionResponseDto ToResponse(Transaction transaction) => new()
-  {
-    TransactionId = transaction.TransactionId,
-    AssistanceCode = transaction.AssistanceCode,
-    RefNo = transaction.RefNo,
-    SocialWorkerId = transaction.SocialWorkerId,
-    Date = transaction.Date,
-    PatientPersonId = transaction.PatientPersonId,
-    PatientPersonName = PersonName(transaction.PatientPerson),
-    RepresentativePersonId = transaction.RepresentativePersonId,
-    RepresentativePersonName = PersonName(transaction.RepresentativePerson),
-    Representative = transaction.Representative,
-    FundSourceId = transaction.FundSourceId,
-    CreditorId = transaction.CreditorId,
-    ModeId = transaction.ModeId,
-    Amount = transaction.Amount,
-    SocialWorkerAssessment = transaction.SocialWorkerAssessment,
-    Remarks = transaction.Remarks,
-    IsReleased = transaction.IsReleased,
-    Status = transaction.Status,
-    CreatedBy = transaction.CreatedBy,
-    DateCreated = transaction.DateCreated,
-    LastUpdatedBy = transaction.LastUpdatedBy,
-    DateLastUpdated = transaction.DateLastUpdated,
-    SocialWorkerUserId = transaction.SocialWorkerUserId,
-    NatureIds = transaction.TransactionServices
-      .Where(service => service.NatureId.HasValue)
-      .Select(service => service.NatureId!.Value)
-      .ToList(),
-  };
-
-  private static string? PersonName(Person? person)
-  {
-    if (person is null)
-      return null;
-
-    var name = string.Join(" ", new[] { person.FirstName, person.MiddleName, person.LastName }
-      .Where(part => !string.IsNullOrWhiteSpace(part))
-      .Select(part => part!.Trim()));
-    return name.Length == 0 ? null : name;
-  }
+  private static string EscapeLike(string value) =>
+    value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[");
 }

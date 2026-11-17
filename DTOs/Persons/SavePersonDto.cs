@@ -22,4 +22,8 @@ public class SavePersonDto
   public string? ContactNo { get; set; }
   public string? SkillOccupation { get; set; }
   public decimal? EstimatedMonthlyIncome { get; set; }
+
+  // saving over a "same" match needs both; the reason goes to the audit log
+  public bool ConfirmDuplicate { get; set; }
+  public string? DuplicateReason { get; set; }
 }

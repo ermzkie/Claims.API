@@ -206,9 +206,24 @@ pages added to `routes.js` are protected automatically.
 | POST / PUT / DELETE | `/api/natureofservice[/{id}]`    | Admin / Super Admin | `{ natureDesc }`                                                                              |
 | GET                 | `/api/lookups/{list}`            | logged in           | Dropdown values `[{ id, code, name }]`: `sexes`, `civil-statuses`, `name-suffixes`, `relationship-statuses`, `modes-of-assistance`, `sources-of-assistance`, `provinces`, `cities?provinceId=`, `barangays?cityMunicipalityId=` |
 | GET                 | `/api/persons`                   | logged in           | Search, paged: `{ items, total, page, pageSize }`. Query: `search`, `cityMunicipalityId`, `barangayId`, `sexId`, `sector` (repeatable), `page`, `pageSize` (max 100) |
-| GET                 | `/api/persons/{id}`              | logged in           | One person with `family` and the barangay's `cityMunicipalityId` / `provinceId`                |
+| GET                 | `/api/persons/{id}`              | logged in           | One person with `family` (members with relationship, group, sex, birthdate, civil status, income, contact, occupation), `familyOf` (people who list this person as family) and the barangay's `cityMunicipalityId` / `provinceId` |
+| GET                 | `/api/persons/{id}/transactions` | logged in           | Paged transaction history where the person is the patient or representative; query: `page` (10 items per page) |
+| GET                 | `/api/persons/matches`           | logged in           | Persons who may be the one being typed in, up to 20: `personId`, `name`, `birthdate`, `address`, `claims`, `level` (`same` / `similar`), `reason`. Query: `lastName`, `firstName`, `middleName`, `nameSuffixId`, `birthdate`, `exceptPersonId` (the person being edited) |
 | POST                | `/api/persons`                   | logged in           | Create (201 with the person). Body below                                                      |
 | PUT                 | `/api/persons/{id}`              | logged in           | Replace **all** fields (send the whole person, not only what changed)                         |
+| POST                | `/api/persons/{id}/family`       | logged in           | Add a family member `{ familyPersonId, relationshipStatusId, remark? }` (201). Relationship required; no self links or duplicates |
+| PUT                 | `/api/persons/{id}/family/{familyCompId}` | logged in | Change the member or relationship, same body |
+| DELETE              | `/api/persons/{id}/family/{familyCompId}` | logged in | Remove a family member (204), optional body `{ remark }` |
+| GET                 | `/api/persons/{id}/family/history` | logged in | Every add, change and remove, newest first: `action`, `old` / `new` (`member`, `relationship`), `remark`, `changedBy`, `date` |
+| GET                 | `/api/dashboard`                 | logged in           | Home page figures for one month. Query: `year`, `month` (default this month)                  |
+| GET                 | `/api/dashboard/beneficiaries`   | logged in           | Who the claims were for. Query: `year`, `month`, `period` = `month` (default) or `year` (January up to the month) |
+| GET                 | `/api/dashboard/budget`          | Admin / Super Admin | Released and obligated per fund source from the finance system. Query: `year`               |
+| GET                 | `/api/person-review/duplicates`  | Admin / Super Admin | Possible duplicate persons, grouped, most claims first. Query: `search`, `decision` = `none` (to review, default), `same` or `different`, `page`, `pageSize` (max 100) |
+| GET                 | `/api/person-review/nameless`    | Admin / Super Admin | Persons with no last or first name, most claims first. Query: `page`, `pageSize` |
+| GET                 | `/api/person-review/persons/{id}/claims` | Admin / Super Admin | A person's latest claims as patient or representative, newest first: `role`, `otherPerson`, `program`, `creditorName`, `amount`, `socialWorker`. Query: `take` (1 to 50, default 10) |
+| POST                | `/api/person-review/duplicates/same` | Admin / Super Admin | Confirm a whole group is one person and which record to keep, to merge later (204): `{ personIds, keepPersonId, remark? }`. Send again with another `keepPersonId` to change it |
+| POST                | `/api/person-review/duplicates/not-same` | Admin / Super Admin | Mark a whole group as different people (204): `{ personIds, remark? }` |
+| POST                | `/api/person-review/duplicates/reopen` | Admin / Super Admin | Undo that, same body (204) |
 
 Role IDs: 1 Super Administrator, 2 Administrator, 3 Frontliner, 4 Social Worker.
 Administrators can only manage Frontliner and Social Worker accounts. Nobody can give the Super
@@ -237,7 +252,8 @@ Swagger is always the up-to-date list. This table is a summary.
 Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuffixId`, `sexId`,
 `civilStatusId`, `birthdate` (`"YYYY-MM-DD"`), `contactNo`, `skillOccupation`,
 `estimatedMonthlyIncome`, `barangayId`, `purokSubdivision`, `street`, `noBuildingName`,
-`isSeniorCitizen`, `isSoloParent`, `isPwd`, `isRr`, `is4P`.
+`isSeniorCitizen`, `isSoloParent`, `isPwd`, `isRr`, `is4P`, and `confirmDuplicate`,
+`duplicateReason` (see below).
 
 - **Search:** digits (with spaces, `+ - ( )`) match the person ID or part of the contact number;
   anything else matches first / middle / last name, every word must match. Filters combine with
@@ -252,6 +268,48 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
   returns that text as `sex`, `barangay` and `municipality`, and fills it from the IDs when a
   person is saved, so always show those fields and send the IDs. Filter and report by the IDs.
 - Validation errors come back as 400 with a `message` to show, like everything else.
+- **Same person check.** Saving a new person, or changing a person's name or birthdate, returns
+  **409** when an active person has the same name: `{ message, matches }`, `matches` shaped like
+  `/api/persons/matches`. Show the matches with a link to open each. To save anyway, send the same
+  body again with `confirmDuplicate: true` and a `duplicateReason` (required, up to 500
+  characters); it goes to the AuditLog (`Entity` = `Person`, `Action` = `SavedAsDuplicate`).
+  Changing other fields of a person who already has a duplicate is not blocked.
+- **How names are matched:** capitals, spaces, dots, hyphens, apostrophes and accents are ignored
+  (DELA CRUZ = DE LA CRUZ, CAÑETE = CANETE, MA. NILDA = MA NILDA). A JR, SR, II, III or IV typed
+  into the first or last name counts as the suffix. **Same:** same last, first and middle name and
+  suffix. **Similar** (shown, never blocks): only one has a middle name, the middle name is only an
+  initial, first and last name swapped, or only one has a suffix. Two different birthdates or
+  suffixes (JR vs SR) are never a match; a missing birthdate matches any. Almost no old records have
+  a birthdate, so in practice this is a name check.
+- Double spaces inside names are collapsed when saving.
+
+### Things to know about the dashboard
+
+- Claims from the old system came over with status 0 but aren't deleted, so they're counted. Only
+  claims made in this app can be deleted (status 0 with a `createdBy`).
+- **Waiting** means made in this app, not deleted and not released. Old claims have no release
+  status, so they never show as waiting. It isn't limited to the chosen month.
+- **Beneficiaries** are patients, each counted once. `firstTime` had no counted claim before the
+  period, `returning` did. Sectors can overlap, so they don't add up to the total. Age is at the
+  end of the month.
+- **Budget** is read live from the finance system (sysPFM) through `getAnnualBalance`. Only fund
+  sources linked to a finance appropriation for that year show up. If the finance server can't be
+  reached it returns 503 with a `message`; show that in the card and keep the rest of the page.
+  Claims don't record their fund source yet, so the budget can't be matched to claims.
+
+### Things to know about person review
+
+- Nothing on persons or claims is changed or merged yet. The only thing saved is the decision
+  (`SamePerson`, `NotSamePerson` or `Reopened`) in AuditLog (`Entity` = `DuplicateGroup`), with who,
+  when and the remark. A decision can be changed straight from same to different and back.
+- `review.keepPersonId` on a "same" group is the record the others will be merged into.
+- **Possible duplicates** are active persons matched as **same** by the rule under persons above
+  (spelling aside; a missing middle name on both counts as the same, and two different birthdates
+  split a group). Each person shows
+  their claims as patient, claims as representative, last claim date and family links, so staff can
+  tell which record to keep.
+- A marked group leaves the to-review list until someone new with the same name is added, then it shows again with everyone. `personIds` must be the whole current group.
+- Claims from the old system count even though their status is 0; claims deleted in this app don't.
 
 ## Rules
 

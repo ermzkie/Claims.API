@@ -10,6 +10,10 @@ internal static class TransactionResponseMapper
     TransactionId = transaction.TransactionId,
     AssistanceCode = transaction.AssistanceCode,
     QueueNo = transaction.QueueNo,
+    QueueNoCode = transaction.LaneType?.LaneTypeCode is { } laneTypeCode &&
+      transaction.QueueNo is { } queueNo
+        ? $"{laneTypeCode}{queueNo}"
+        : null,
     RefNo = transaction.RefNo,
     Date = transaction.Date,
     LaneTypeId = transaction.LaneTypeId,

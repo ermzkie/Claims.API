@@ -117,6 +117,94 @@ public class TransactionTests
   }
 
   [Fact]
+  public async Task TransactionResponses_IncludeRelatedDescriptions()
+  {
+    await using var app = new ClaimsApiFactory();
+    await SeedRolesAsync(app);
+    var userId = await CreateUserAsync(app, "worker", Password, "Frontliner");
+    using var client = await LoginAsAsync(app, "worker", Password);
+
+    short laneTypeId;
+    short modeId = 71;
+    short sourceId = 72;
+    const int creditorId = 73;
+    const int fundSourceId = 74;
+    int patientPersonId;
+    await using (var db = app.CreateDbContext())
+    {
+      var laneType = new LaneType { LaneTypeCode = "FAST", LaneTypeDesc = "Fast lane" };
+      var source = new SourceOfAssistance { SourceId = sourceId, SourceDesc = "Source description" };
+      db.LaneTypes.Add(laneType);
+      db.ModeOfAssistances.Add(new ModeOfAssistance { ModeId = modeId, ModeDesc = "Mode description" });
+      db.SourceOfAssistances.Add(source);
+      db.FundSources.Add(new FundSource
+      {
+        FundSourceId = fundSourceId,
+        SourceId = sourceId,
+        Status = true,
+      });
+      db.Creditors.Add(new Creditor
+      {
+        CreditorId = creditorId,
+        CreditorName = "Creditor name",
+        Status = true,
+      });
+      var patient = new Person { FirstName = "Test", LastName = "Patient", Status = true };
+      db.People.Add(patient);
+      await db.SaveChangesAsync();
+      laneTypeId = laneType.LaneTypeId;
+      patientPersonId = patient.PersonId;
+    }
+
+    var response = await client.PostAsJsonAsync("/api/transactions/save", new
+    {
+      laneTypeId,
+      patientPersonId,
+      modeId,
+      fundSourceId,
+      creditorId,
+    });
+
+    Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    var created = await response.Content.ReadFromJsonAsync<TransactionResponseDto>();
+    Assert.NotNull(created);
+    AssertDescriptions(created);
+
+    var fetched = await client.GetFromJsonAsync<TransactionResponseDto>(
+      $"/api/transactions/{created.TransactionId}");
+    AssertDescriptions(fetched);
+
+    var all = await client.GetFromJsonAsync<PagedResult<TransactionResponseDto>>("/api/transactions");
+    AssertDescriptions(Assert.Single(all!.Items));
+
+    var checkedOutResponse = await client.PostAsync(
+      $"/api/transactions/{created.TransactionId}/checkout-social-worker",
+      content: null);
+    Assert.Equal(HttpStatusCode.OK, checkedOutResponse.StatusCode);
+    AssertDescriptions(await checkedOutResponse.Content.ReadFromJsonAsync<TransactionResponseDto>());
+
+    var history = await client.GetFromJsonAsync<PagedResult<TransactionResponseDto>>(
+      $"/api/persons/{patientPersonId}/transactions");
+    AssertDescriptions(Assert.Single(history!.Items));
+
+    await using var verify = app.CreateDbContext();
+    var saved = await verify.Transactions.SingleAsync(
+      transaction => transaction.TransactionId == created.TransactionId);
+    Assert.Equal(laneTypeId, saved.LaneTypeId);
+    Assert.Equal(userId, saved.SocialWorkerUserId);
+
+    void AssertDescriptions(TransactionResponseDto? transaction)
+    {
+      Assert.NotNull(transaction);
+      Assert.Equal(laneTypeId, transaction.LaneTypeId);
+      Assert.Equal("Fast lane", transaction.LaneTypeDesc);
+      Assert.Equal("Creditor name", transaction.CreditorName);
+      Assert.Equal("Mode description", transaction.ModeDesc);
+      Assert.Equal("Source description", transaction.SourceDesc);
+    }
+  }
+
+  [Fact]
   public async Task SaveTransaction_AssignsQueueNumbersAndResetsTheNextDay()
   {
     await using var app = new ClaimsApiFactory();

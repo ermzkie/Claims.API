@@ -218,12 +218,12 @@ pages added to `routes.js` are protected automatically.
 | GET                 | `/api/dashboard`                 | logged in           | Home page figures for one month. Query: `year`, `month` (default this month)                  |
 | GET                 | `/api/dashboard/beneficiaries`   | logged in           | Who the claims were for. Query: `year`, `month`, `period` = `month` (default) or `year` (January up to the month) |
 | GET                 | `/api/dashboard/budget`          | Admin / Super Admin | Released and obligated per fund source from the finance system. Query: `year`               |
-| GET                 | `/api/fund-sources`              | Admin / Super Admin | Fund sources for a year: `{ year, years, financeAvailable, items }`; each item `fundSourceId`, `year`, `sourceId`, `program`, `kind` (`appropriation` / `trustFund`), `financeId`, `finance` (`id`, `code`, `name`, `amount`), `released`, `obligated`, `pending`, `original`, `supplemental`, `adjustments`, `claims`, `claimsAmount`, `addedOn`, `addedBy`, `changedOn`, `changedBy`. Query: `year` |
-| GET                 | `/api/fund-sources/{id}/claims`  | Admin / Super Admin | Latest claims charged to it: `transactionId`, `refNo`, `date`, `patientPersonId`, `patient`, `assistanceCode`, `program`, `creditorId`, `creditorName`, `amount`, `isReleased`. Query: `take` (1 to 100, default 20) |
+| GET                 | `/api/fund-sources`              | Admin / Super Admin | Fund sources for a year: `{ year, years, financeAvailable, items }` with finance figures and claims. Query: `year` |
+| GET                 | `/api/fund-sources/{id}/claims`  | Admin / Super Admin | Latest claims charged to it. Query: `take` (1 to 100) |
 | GET                 | `/api/fund-sources/finance-accounts` | Admin / Super Admin | Accounts that paid aid: `id`, `code`, `name`, `amount`, `aidObligations`, `creditorPayments`, `paysAid`. Query: `kind` (`appropriation` needs `year`, or `trustFund`) |
 | POST / PUT          | `/api/fund-sources`, `/api/fund-sources/{id}` | Admin / Super Admin | `{ year, sourceId, appropriationId }` or `{ year, sourceId, trustFundId }` |
 | DELETE              | `/api/fund-sources/{id}`         | Admin / Super Admin | Remove (204), only when no claim uses it |
-| GET                 | `/api/person-review/duplicates`  | Admin / Super Admin | Possible duplicate persons, grouped, most claims first. Query: `search`, `decision` = `none` (to review, default), `same` or `different`, `page`, `pageSize` (max 100) |
+| GET                 | `/api/person-review/duplicates`  | Admin / Super Admin | Duplicate groups. Query: `search`, `decision` (`none`, `same`, `different`), `page`, `pageSize` |
 | GET                 | `/api/person-review/nameless`    | Admin / Super Admin | Persons with no last or first name, most claims first. Query: `page`, `pageSize` |
 | GET                 | `/api/person-review/persons/{id}/claims` | Admin / Super Admin | A person's latest claims. Query: `take` (1 to 50) |
 | POST                | `/api/person-review/duplicates/same` | Admin / Super Admin | Same person (204): `{ personIds, keepPersonId, remark? }` |

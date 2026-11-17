@@ -10,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Claims.API.Controllers;
 
-// lists for the office to clean up persons; the only thing saved here is a review decision in AuditLog
+// only review decisions are saved here (AuditLog), nothing is merged
 [Route("api/person-review")]
 [ApiController]
 [Authorize(Policy = AuthPolicies.UserAdmin)]
@@ -24,8 +24,6 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
   private const string Reopened = "Reopened";
   private static readonly JsonSerializerOptions LogJson = new(JsonSerializerDefaults.Web);
 
-  // active persons with the same name (spelling aside) and no different birthdates.
-  // decision: none (still to review, default), same (waiting to be merged) or different
   [HttpGet("duplicates")]
   public async Task<ActionResult<PersonReviewPageDto<DuplicateGroupDto>>> Duplicates(
     [FromQuery] string? search = null,
@@ -53,12 +51,9 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
       groups.Count, page, pageSize, groups.Skip((page - 1) * pageSize).Take(pageSize).ToList());
   }
 
-  // confirms the records are one person and which record to keep, to be merged later;
-  // nothing is merged yet. Sending it again with another keepPersonId changes the record to keep.
   [HttpPost("duplicates/same")]
   public Task<IActionResult> MarkSame(DuplicateDecisionDto dto) => DecideAsync(dto, Same);
 
-  // marks a group as different people so it stops showing; it comes back if someone new joins it
   [HttpPost("duplicates/not-same")]
   public Task<IActionResult> MarkNotSame(DuplicateDecisionDto dto) => DecideAsync(dto, NotSame);
 
@@ -78,7 +73,7 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
       return BadRequest(new { message = "Keep the remark to 500 characters." });
     }
 
-    // only a whole current group can be marked, so an old page can't mark the wrong set
+    // whole current group only, so an old page can't mark the wrong set
     var key = GroupKey(ids);
     var group = (await GroupsAsync(null)).FirstOrDefault(g => GroupKey(g.Persons.Select(p => p.PersonId)) == key);
     if (group is null)
@@ -96,7 +91,6 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
       keep = k;
     }
 
-    // changing a decision straight from same to different (or back) is allowed
     var review = (await ReviewsAsync()).GetValueOrDefault(key);
     var current = review?.Decision;
     if (action == Same && current == "same" && review!.KeepPersonId == keep)
@@ -129,7 +123,6 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
 
   private static string GroupKey(IEnumerable<int> ids) => string.Join(",", ids.Order());
 
-  // the latest decision per group wins; reopening clears it
   private async Task<Dictionary<string, DuplicateReviewDto>> ReviewsAsync()
   {
     var rows = await context.AuditLogs.AsNoTracking()
@@ -159,8 +152,7 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
     return latest.Where(kv => kv.Value is not null).ToDictionary(kv => kv.Key, kv => kv.Value!);
   }
 
-  // groups use the same "same person" rule as the new person check (PersonMatcher), so
-  // DELA CRUZ and DE LA CRUZ, or MA. NILDA and MA NILDA, land in one group
+  // same rule as the new person check
   private async Task<List<DuplicateGroupDto>> GroupsAsync(string? search)
   {
     var people = await context.People.AsNoTracking()
@@ -173,7 +165,6 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
       .Select(p => new { p.PersonId, p.LastName, p.FirstName, p.MiddleName, p.Birthdate, Parts = PersonMatcher.Parse(p.LastName, p.FirstName, p.MiddleName, p.Suffix) })
       .GroupBy(p => PersonMatcher.GroupKey(p.Parts))
       .Where(g => g.Count() > 1)
-      // a missing birthdate matches any; two different birthdates are different people
       .SelectMany(g => g.Select(p => p.Birthdate).OfType<DateOnly>().Distinct().Count() > 1
         ? g.GroupBy(p => p.Birthdate).Select(b => b.ToList())
         : [g.ToList()])
@@ -190,7 +181,6 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
           .OrderByDescending(r => r.Claims)
           .ThenBy(r => r.PersonId)
           .ToList();
-        // the heading shows the busiest record's spelling
         var p = g.First(x => x.PersonId == persons[0].PersonId);
         return new DuplicateGroupDto(
           p.LastName!.Trim(), p.FirstName!.Trim(), p.MiddleName?.Trim(), g.Select(x => x.Birthdate).Max(),
@@ -202,7 +192,6 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
       .ToList();
   }
 
-  // active persons missing a last or first name; most claims first so the busiest get fixed first
   [HttpGet("nameless")]
   public async Task<ActionResult<PersonReviewPageDto<PersonReviewRowDto>>> Nameless(
     [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
@@ -225,7 +214,6 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
       rows.Count, page, pageSize, rows.Skip((page - 1) * pageSize).Take(pageSize).ToList());
   }
 
-  // a person's latest claims, as patient or representative, to help work out who they are
   [HttpGet("persons/{id:int}/claims")]
   public async Task<ActionResult<IReadOnlyList<PersonReviewClaimDto>>> Claims(int id, [FromQuery] int take = 10)
   {
@@ -273,7 +261,7 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
       .GroupBy(a => a.AssistanceCode!.Trim().ToUpperInvariant())
       .ToDictionary(g => g.Key, g => g.First().AssistanceType);
 
-    // old claims point at Officers, which also stores passwords: read names only
+    // Officers has passwords: names only
     var officerIds = rows
       .Select(r => int.TryParse(r.SocialWorkerId?.Trim(), out var n) ? n : (int?)null)
       .OfType<int>()
@@ -337,7 +325,6 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
       })
       .ToListAsync();
 
-    // same rule as everywhere else: old-system claims count, deleted ones made here don't
     var claims = context.Transactions.AsNoTracking().Where(t => t.Status || t.CreatedBy == null);
     var asPatient = await claims
       .Where(t => t.PatientPersonId != null && ids.Contains(t.PatientPersonId!.Value))

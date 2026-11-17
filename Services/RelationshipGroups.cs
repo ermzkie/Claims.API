@@ -1,6 +1,6 @@
 namespace Claims.API.Services;
 
-// fixed list (reports rely on it), also the dropdown order
+// reports rely on this list
 public static class RelationshipGroups
 {
   public static readonly string[] All =

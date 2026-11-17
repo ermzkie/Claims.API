@@ -12,7 +12,6 @@ public class CurrentUserTests
 {
   private const string Pw = "Str0ng-Passw0rd!x";
 
-  // Same claims the token check puts on every authenticated request.
   private static ClaimsPrincipal Principal(int id, string username, params string[] roles)
   {
     var identity = new ClaimsIdentity("Bearer", "name", ClaimTypes.Role);

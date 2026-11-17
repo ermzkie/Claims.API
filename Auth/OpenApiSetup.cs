@@ -2,7 +2,6 @@ using Microsoft.OpenApi;
 
 namespace Claims.API.Auth;
 
-// API documentation page (Swagger UI), for development only.
 public static class OpenApiSetup
 {
   public static IServiceCollection AddClaimsOpenApi(this IServiceCollection services)
@@ -38,8 +37,7 @@ public static class OpenApiSetup
     return services;
   }
 
-  // Only call this in Development. The page and the document are reachable without logging in;
-  // every API endpoint still needs the token.
+  // development only: the docs page needs no login
   public static WebApplication UseClaimsSwaggerUi(this WebApplication app)
   {
     app.MapOpenApi().AllowAnonymous();

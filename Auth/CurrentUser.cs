@@ -4,9 +4,6 @@ using Claims.API.DTOs.Auth;
 
 namespace Claims.API.Auth;
 
-// The logged-in user for the current request. Inject it into a controller or service.
-// Id, Username and Roles come from the request (already checked against the database
-// on every request), so they cost nothing. GetProfileAsync loads the full record once.
 public interface ICurrentUser
 {
   bool IsAuthenticated { get; }
@@ -52,6 +49,5 @@ public class CurrentUser : ICurrentUser
 
   public bool IsInRole(string role) => Principal.IsInRole(role);
 
-  // Same data as GET /api/auth/me. Loaded on first use, reused for the rest of the request.
   public Task<CurrentUserDto?> GetProfileAsync() => _profile ??= _auth.GetCurrentUserAsync(Id);
 }

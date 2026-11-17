@@ -1,6 +1,6 @@
 namespace Claims.API.DTOs.Persons;
 
-// Used for both create and update; an update replaces every field.
+// update replaces every field
 public class SavePersonDto
 {
   public string? FirstName { get; set; }
@@ -23,7 +23,6 @@ public class SavePersonDto
   public string? SkillOccupation { get; set; }
   public decimal? EstimatedMonthlyIncome { get; set; }
 
-  // saving over a "same" match needs both; the reason goes to the audit log
   public bool ConfirmDuplicate { get; set; }
   public string? DuplicateReason { get; set; }
 }

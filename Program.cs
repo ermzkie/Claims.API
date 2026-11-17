@@ -44,6 +44,7 @@ builder.Services.AddProblemDetails();
 // Register controllers
 builder.Services.AddControllers();
 builder.Services.AddScoped<Claims.API.Services.ReferenceDataService>();
+builder.Services.AddScoped<Claims.API.Services.IFinanceAccounts, Claims.API.Services.SqlFinanceAccounts>();
 
 // OpenAPI
 builder.Services.AddClaimsOpenApi();

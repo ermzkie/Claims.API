@@ -24,6 +24,11 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
     return person is null ? NotFound(new { message = "Person not found." }) : person;
   }
 
+  // persons who may be the one being typed in; "same" ones block saving until confirmed
+  [HttpGet("matches")]
+  public async Task<ActionResult<List<PersonMatchDto>>> Matches([FromQuery] PersonMatchQueryDto query) =>
+    await persons.FindMatchesAsync(query);
+
   [HttpGet("{id:int}/transactions")]
   public async Task<ActionResult<PagedResult<TransactionResponseDto>>> GetTransactionHistory(
     int id,
@@ -92,6 +97,7 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
   private ActionResult Map(PersonResult result) => result.Outcome switch
   {
     PersonOutcome.NotFound => NotFound(new { message = result.Message }),
+    PersonOutcome.Duplicate => Conflict(new { message = result.Message, matches = result.Matches }),
     _ => BadRequest(new { message = result.Message }),
   };
 

@@ -19,6 +19,8 @@ public class ClaimsApiFactory : WebApplicationFactory<Program>
 
   public FakeTimeProvider Clock { get; } = new(new DateTimeOffset(2026, 11, 10, 8, 0, 0, TimeSpan.Zero));
 
+  public FakeFinanceAccounts Finance { get; } = new();
+
   public ClaimsApiFactory()
   {
     _connection.Open();
@@ -43,6 +45,9 @@ public class ClaimsApiFactory : WebApplicationFactory<Program>
 
       services.RemoveAll<TimeProvider>();
       services.AddSingleton<TimeProvider>(Clock);
+
+      services.RemoveAll<Claims.API.Services.IFinanceAccounts>();
+      services.AddSingleton<Claims.API.Services.IFinanceAccounts>(Finance);
     });
   }
 

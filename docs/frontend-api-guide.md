@@ -218,6 +218,11 @@ pages added to `routes.js` are protected automatically.
 | GET                 | `/api/dashboard`                 | logged in           | Home page figures for one month. Query: `year`, `month` (default this month)                  |
 | GET                 | `/api/dashboard/beneficiaries`   | logged in           | Who the claims were for. Query: `year`, `month`, `period` = `month` (default) or `year` (January up to the month) |
 | GET                 | `/api/dashboard/budget`          | Admin / Super Admin | Released and obligated per fund source from the finance system. Query: `year`               |
+| GET                 | `/api/fund-sources`              | Admin / Super Admin | Fund sources for a year: `{ year, years, financeAvailable, items }`; each item `fundSourceId`, `year`, `sourceId`, `program`, `kind` (`appropriation` / `trustFund`), `financeId`, `finance` (`id`, `code`, `name`, `amount`), `released`, `obligated`, `pending`, `original`, `supplemental`, `adjustments`, `claims`, `claimsAmount`, `addedOn`, `addedBy`, `changedOn`, `changedBy`. Query: `year` |
+| GET                 | `/api/fund-sources/{id}/claims`  | Admin / Super Admin | Latest claims charged to it: `transactionId`, `refNo`, `date`, `patientPersonId`, `patient`, `assistanceCode`, `program`, `creditorId`, `creditorName`, `amount`, `isReleased`. Query: `take` (1 to 100, default 20) |
+| GET                 | `/api/fund-sources/finance-accounts` | Admin / Super Admin | Accounts that paid aid: `id`, `code`, `name`, `amount`, `aidObligations`, `creditorPayments`, `paysAid`. Query: `kind` (`appropriation` needs `year`, or `trustFund`) |
+| POST / PUT          | `/api/fund-sources`, `/api/fund-sources/{id}` | Admin / Super Admin | `{ year, sourceId, appropriationId }` or `{ year, sourceId, trustFundId }` |
+| DELETE              | `/api/fund-sources/{id}`         | Admin / Super Admin | Remove (204), only when no claim uses it |
 | GET                 | `/api/person-review/duplicates`  | Admin / Super Admin | Possible duplicate persons, grouped, most claims first. Query: `search`, `decision` = `none` (to review, default), `same` or `different`, `page`, `pageSize` (max 100) |
 | GET                 | `/api/person-review/nameless`    | Admin / Super Admin | Persons with no last or first name, most claims first. Query: `page`, `pageSize` |
 | GET                 | `/api/person-review/persons/{id}/claims` | Admin / Super Admin | A person's latest claims as patient or representative, newest first: `role`, `otherPerson`, `program`, `creditorName`, `amount`, `socialWorker`. Query: `take` (1 to 50, default 10) |
@@ -296,6 +301,20 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
   sources linked to a finance appropriation for that year show up. If the finance server can't be
   reached it returns 503 with a `message`; show that in the card and keep the rest of the page.
   Claims don't record their fund source yet, so the budget can't be matched to claims.
+
+### Things to know about fund sources
+
+- An appropriation (per year) or a trust fund. The dashboard budget reads them through `getAnnualBalance`.
+- Accounts come live from sysPFM, OPSWDO only (office 17). Finance down: saving returns 503, the list
+  still loads with `financeAvailable: false`.
+- Only accounts that paid aid can be picked: aid wording in finance (`aidObligations`) or paid to a
+  Claims creditor (`creditorPayments`). Saving any other account returns 400. Show
+  `finance.paysAid: false` as a problem.
+- One account per year. No inactive: remove instead, only when no claims use it. Once claims use it,
+  year and program are locked.
+- `released` = `original + supplemental + adjustments`, `obligated` is approved only, `pending` is
+  separate. Trust funds skip deleted receipts. Can differ from the dashboard budget.
+- Changes go to AuditLog (`FundSource`).
 
 ### Things to know about person review
 

@@ -170,6 +170,16 @@ public class TransactionsController(
     SaveTransactionDto dto,
     CancellationToken cancellationToken)
   {
+    if (!dto.LaneTypeId.HasValue)
+      return BadRequest("Lane type is required.");
+
+    if (!await context.LaneTypes.AnyAsync(
+      x => x.LaneTypeId == dto.LaneTypeId.Value,
+      cancellationToken))
+    {
+      return BadRequest("Lane type was not found.");
+    }
+
     var now = time.GetUtcNow().UtcDateTime.AddHours(8);
     var transaction = dto.TransactionId.HasValue
       ? await context.Transactions
@@ -179,6 +189,9 @@ public class TransactionsController(
       : null;
     var isNew = transaction is null;
 
+    if (isNew && !dto.Date.HasValue)
+      return BadRequest("Date is required to assign a queue number.");
+
     await using var dbTransaction = isNew || dto.NatureIds is not null
       ? await context.Database.BeginTransactionAsync(
         isNew ? IsolationLevel.Serializable : IsolationLevel.ReadCommitted,
@@ -187,9 +200,11 @@ public class TransactionsController(
 
     if (transaction is null)
     {
-      var queueDate = now.Date;
+      var queueDate = dto.Date!.Value.Date;
+      var nextDay = queueDate.AddDays(1);
       var lastQueueNo = await context.Transactions
-        .Where(x => x.DateCreated >= queueDate && x.DateCreated < queueDate.AddDays(1))
+        .Where(x => x.Date >= queueDate && x.Date < nextDay)
+        .Where(x => x.LaneTypeId == dto.LaneTypeId)
         .MaxAsync(x => x.QueueNo, cancellationToken);
 
       transaction = new Transaction

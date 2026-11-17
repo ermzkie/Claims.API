@@ -219,7 +219,8 @@ pages added to `routes.js` are protected automatically.
 | GET                 | `/api/dashboard/budget`          | Admin / Super Admin | Released and obligated per fund source from the finance system. Query: `year`               |
 | GET                 | `/api/person-review/duplicates`  | Admin / Super Admin | Possible duplicate persons, grouped, most claims first. Query: `search`, `decision` = `none` (to review, default), `same` or `different`, `page`, `pageSize` (max 100) |
 | GET                 | `/api/person-review/nameless`    | Admin / Super Admin | Persons with no last or first name, most claims first. Query: `page`, `pageSize` |
-| POST                | `/api/person-review/duplicates/same` | Admin / Super Admin | Confirm a whole group is one person, to merge later (204): `{ personIds, remark? }` |
+| GET                 | `/api/person-review/persons/{id}/claims` | Admin / Super Admin | A person's latest claims as patient or representative, newest first: `role`, `otherPerson`, `program`, `creditorName`, `amount`, `socialWorker`. Query: `take` (1 to 50, default 10) |
+| POST                | `/api/person-review/duplicates/same` | Admin / Super Admin | Confirm a whole group is one person and which record to keep, to merge later (204): `{ personIds, keepPersonId, remark? }`. Send again with another `keepPersonId` to change it |
 | POST                | `/api/person-review/duplicates/not-same` | Admin / Super Admin | Mark a whole group as different people (204): `{ personIds, remark? }` |
 | POST                | `/api/person-review/duplicates/reopen` | Admin / Super Admin | Undo that, same body (204) |
 
@@ -285,6 +286,7 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 - Nothing on persons or claims is changed or merged yet. The only thing saved is the decision
   (`SamePerson`, `NotSamePerson` or `Reopened`) in AuditLog (`Entity` = `DuplicateGroup`), with who,
   when and the remark. A decision can be changed straight from same to different and back.
+- `review.keepPersonId` on a "same" group is the record the others will be merged into.
 - **Possible duplicates** are active persons with the same last, first and middle name and the
   same birthdate (a missing middle name or birthdate on both counts as the same). Each person shows
   their claims as patient, claims as representative, last claim date and family links, so staff can

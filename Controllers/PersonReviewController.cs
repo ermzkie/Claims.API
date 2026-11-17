@@ -52,7 +52,8 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
       groups.Count, page, pageSize, groups.Skip((page - 1) * pageSize).Take(pageSize).ToList());
   }
 
-  // confirms the records are one person, to be merged later; nothing is merged yet
+  // confirms the records are one person and which record to keep, to be merged later;
+  // nothing is merged yet. Sending it again with another keepPersonId changes the record to keep.
   [HttpPost("duplicates/same")]
   public Task<IActionResult> MarkSame(DuplicateDecisionDto dto) => DecideAsync(dto, Same);
 
@@ -84,11 +85,22 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
       return BadRequest(new { message = "These persons are no longer a possible duplicate group. Reload the list." });
     }
 
-    // changing a decision straight from same to different (or back) is allowed
-    var current = (await ReviewsAsync()).GetValueOrDefault(key)?.Decision;
-    if (action == Same && current == "same")
+    int? keep = null;
+    if (action == Same)
     {
-      return BadRequest(new { message = "This group is already marked as the same person." });
+      if (dto.KeepPersonId is not { } k || !ids.Contains(k))
+      {
+        return BadRequest(new { message = "Pick which record to keep." });
+      }
+      keep = k;
+    }
+
+    // changing a decision straight from same to different (or back) is allowed
+    var review = (await ReviewsAsync()).GetValueOrDefault(key);
+    var current = review?.Decision;
+    if (action == Same && current == "same" && review!.KeepPersonId == keep)
+    {
+      return BadRequest(new { message = $"This group is already marked as the same person, keeping #{keep}." });
     }
     if (action == NotSame && current == "different")
     {
@@ -105,7 +117,7 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
       EntityId = ids[0],
       PersonId = ids[0],
       Action = action,
-      NewValues = JsonSerializer.Serialize(new DuplicateGroupValues(ids), LogJson),
+      NewValues = JsonSerializer.Serialize(new DuplicateGroupValues(ids, keep), LogJson),
       Remark = remark,
       UserId = currentUser.Id,
       DateCreated = time.GetLocalNow().DateTime,
@@ -128,7 +140,8 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
     var latest = new Dictionary<string, DuplicateReviewDto?>();
     foreach (var a in rows)
     {
-      var ids = a.NewValues is null ? null : JsonSerializer.Deserialize<DuplicateGroupValues>(a.NewValues, LogJson)?.PersonIds;
+      var values = a.NewValues is null ? null : JsonSerializer.Deserialize<DuplicateGroupValues>(a.NewValues, LogJson);
+      var ids = values?.PersonIds;
       if (ids is null || ids.Count < 2)
       {
         continue;
@@ -138,7 +151,8 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
           a.Action == Same ? "same" : "different",
           a.Lastname is null && a.Firstname is null ? a.Username : $"{a.Lastname}, {a.Firstname}".Trim(' ', ','),
           a.DateCreated,
-          a.Remark)
+          a.Remark,
+          a.Action == Same ? values!.KeepPersonId : null)
         : null;
     }
     return latest.Where(kv => kv.Value is not null).ToDictionary(kv => kv.Key, kv => kv.Value!);
@@ -215,6 +229,90 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
 
     return new PersonReviewPageDto<PersonReviewRowDto>(
       rows.Count, page, pageSize, rows.Skip((page - 1) * pageSize).Take(pageSize).ToList());
+  }
+
+  // a person's latest claims, as patient or representative, to help work out who they are
+  [HttpGet("persons/{id:int}/claims")]
+  public async Task<ActionResult<IReadOnlyList<PersonReviewClaimDto>>> Claims(int id, [FromQuery] int take = 10)
+  {
+    if (take is < 1 or > 50)
+    {
+      return BadRequest(new { message = "Take 1 to 50 claims." });
+    }
+    if (!await context.People.AnyAsync(p => p.PersonId == id))
+    {
+      return NotFound(new { message = "Person not found." });
+    }
+
+    var rows = await context.Transactions.AsNoTracking()
+      .Where(t => (t.Status || t.CreatedBy == null) && (t.PatientPersonId == id || t.RepresentativePersonId == id))
+      .OrderByDescending(t => t.Date).ThenByDescending(t => t.TransactionId)
+      .Take(take)
+      .Select(t => new
+      {
+        t.TransactionId,
+        t.RefNo,
+        t.Date,
+        t.PatientPersonId,
+        PatientLast = t.PatientPerson!.LastName,
+        PatientFirst = t.PatientPerson.FirstName,
+        PatientMiddle = t.PatientPerson.MiddleName,
+        t.RepresentativePersonId,
+        RepLast = t.RepresentativePerson!.LastName,
+        RepFirst = t.RepresentativePerson.FirstName,
+        RepMiddle = t.RepresentativePerson.MiddleName,
+        RepText = t.Representative,
+        t.AssistanceCode,
+        t.CreditorId,
+        CreditorName = t.Creditor!.CreditorName,
+        t.Amount,
+        WorkerLast = t.SocialWorkerUser!.Lastname,
+        WorkerFirst = t.SocialWorkerUser.Firstname,
+        t.SocialWorkerId,
+      })
+      .ToListAsync();
+
+    var programs = (await context.Assistances.AsNoTracking()
+        .Where(a => a.AssistanceCode != null)
+        .Select(a => new { a.AssistanceCode, a.AssistanceType })
+        .ToListAsync())
+      .GroupBy(a => a.AssistanceCode!.Trim().ToUpperInvariant())
+      .ToDictionary(g => g.Key, g => g.First().AssistanceType);
+
+    // old claims point at Officers, which also stores passwords: read names only
+    var officerIds = rows
+      .Select(r => int.TryParse(r.SocialWorkerId?.Trim(), out var n) ? n : (int?)null)
+      .OfType<int>()
+      .Distinct()
+      .ToList();
+    var officers = await context.Officers.AsNoTracking()
+      .Where(o => officerIds.Contains(o.Idnumber))
+      .Select(o => new { o.Idnumber, o.Name })
+      .ToDictionaryAsync(o => o.Idnumber, o => o.Name);
+
+    return rows.Select(r =>
+      {
+        var asPatient = r.PatientPersonId == id;
+        var other = asPatient
+          ? Join(", ", r.RepLast, Join(" ", r.RepFirst, r.RepMiddle)) ?? (string.IsNullOrWhiteSpace(r.RepText) ? null : r.RepText.Trim())
+          : Join(", ", r.PatientLast, Join(" ", r.PatientFirst, r.PatientMiddle));
+        var worker = Join(", ", r.WorkerLast, r.WorkerFirst)
+          ?? (int.TryParse(r.SocialWorkerId?.Trim(), out var officerId) ? officers.GetValueOrDefault(officerId)?.Trim() : null);
+        return new PersonReviewClaimDto(
+          r.TransactionId,
+          r.RefNo?.Trim(),
+          r.Date,
+          asPatient ? "patient" : "representative",
+          other,
+          asPatient ? r.RepresentativePersonId : r.PatientPersonId,
+          r.AssistanceCode?.Trim(),
+          r.AssistanceCode is null ? null : programs.GetValueOrDefault(r.AssistanceCode.Trim().ToUpperInvariant()),
+          r.CreditorId,
+          r.CreditorName,
+          r.Amount,
+          worker);
+      })
+      .ToList();
   }
 
   private static bool ValidPage(int page, int pageSize) => page >= 1 && pageSize is >= 1 and <= MaxPageSize;

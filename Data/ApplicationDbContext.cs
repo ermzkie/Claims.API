@@ -31,6 +31,8 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<FundSource> FundSources { get; set; }
 
+    public virtual DbSet<LaneType> LaneTypes { get; set; }
+
     public virtual DbSet<ModeOfAssistance> ModeOfAssistances { get; set; }
 
     public virtual DbSet<NameSuffix> NameSuffixes { get; set; }
@@ -186,6 +188,8 @@ public partial class ApplicationDbContext : DbContext
             entity.HasOne(d => d.Creditor).WithMany(p => p.Transactions).HasConstraintName("FK_Transactions_Creditor");
 
             entity.HasOne(d => d.FundSource).WithMany(p => p.Transactions).HasConstraintName("FK_Transactions_FundSource");
+
+            entity.HasOne(d => d.LaneType).WithMany(p => p.Transactions).HasConstraintName("FK_Transactions_LaneType");
 
             entity.HasOne(d => d.Mode).WithMany(p => p.Transactions).HasConstraintName("FK_Transactions_ModeOfAssistance");
 

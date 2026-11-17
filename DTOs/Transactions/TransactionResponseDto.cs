@@ -7,14 +7,19 @@ public class TransactionResponseDto
   public short? QueueNo { get; set; }
   public string? RefNo { get; set; }
   public DateTime? Date { get; set; }
+  public short? LaneTypeId { get; set; }
+  public string? LaneTypeDesc { get; set; }
   public int? PatientPersonId { get; set; }
   public string? PatientPersonName { get; set; }
   public int? RepresentativePersonId { get; set; }
   public string? RepresentativePersonName { get; set; }
   public string? Representative { get; set; }
   public int? FundSourceId { get; set; }
+  public string? SourceDesc { get; set; }
   public int? CreditorId { get; set; }
+  public string? CreditorName { get; set; }
   public short? ModeId { get; set; }
+  public string? ModeDesc { get; set; }
   public decimal? Amount { get; set; }
   public int? SocialWorkerUserId { get; set; }
   public string? SocialWorkerUserFullName { get; set; }

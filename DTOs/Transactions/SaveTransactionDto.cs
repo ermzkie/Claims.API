@@ -8,6 +8,7 @@ public class SaveTransactionDto
   public int? TransactionId { get; set; }
 
   public DateTime? Date { get; set; }
+  public short? LaneTypeId { get; set; }
   public int? PatientPersonId { get; set; }
   public int? RepresentativePersonId { get; set; }
   public int? FundSourceId { get; set; }

@@ -123,6 +123,11 @@ public class TransactionsController(
         .Include(x => x.PatientPerson)
         .Include(x => x.RepresentativePerson)
         .Include(x => x.SocialWorkerUser)
+        .Include(x => x.LaneType)
+        .Include(x => x.Creditor)
+        .Include(x => x.Mode)
+        .Include(x => x.FundSource)
+          .ThenInclude(x => x!.Source)
         .Skip((parameters.Page - 1) * pageSize)
         .Take(pageSize)
         .ToListAsync();
@@ -147,6 +152,11 @@ public class TransactionsController(
       .Include(x => x.PatientPerson)
       .Include(x => x.RepresentativePerson)
       .Include(x => x.SocialWorkerUser)
+      .Include(x => x.LaneType)
+      .Include(x => x.Creditor)
+      .Include(x => x.Mode)
+      .Include(x => x.FundSource)
+        .ThenInclude(x => x!.Source)
       .Where(x => x.TransactionId == id)
       .FirstOrDefaultAsync();
 
@@ -201,6 +211,7 @@ public class TransactionsController(
     }
 
     transaction.Date = dto.Date;
+    transaction.LaneTypeId = dto.LaneTypeId;
     transaction.PatientPersonId = dto.PatientPersonId;
     transaction.RepresentativePersonId = dto.RepresentativePersonId;
     transaction.FundSourceId = dto.FundSourceId;
@@ -241,9 +252,26 @@ public class TransactionsController(
     if (dbTransaction is not null)
       await dbTransaction.CommitAsync(cancellationToken);
 
-    return isNew
-      ? CreatedAtAction(nameof(GetById), new { id = transaction.TransactionId }, TransactionResponseMapper.ToResponse(transaction))
-      : NoContent();
+    if (!isNew)
+      return NoContent();
+
+    var createdTransaction = await context.Transactions
+      .AsNoTracking()
+      .Include(x => x.TransactionServices)
+      .Include(x => x.PatientPerson)
+      .Include(x => x.RepresentativePerson)
+      .Include(x => x.SocialWorkerUser)
+      .Include(x => x.LaneType)
+      .Include(x => x.Creditor)
+      .Include(x => x.Mode)
+      .Include(x => x.FundSource)
+        .ThenInclude(x => x!.Source)
+      .SingleAsync(x => x.TransactionId == transaction.TransactionId, cancellationToken);
+
+    return CreatedAtAction(
+      nameof(GetById),
+      new { id = createdTransaction.TransactionId },
+      TransactionResponseMapper.ToResponse(createdTransaction));
   }
 
   [HttpPost("{id:int}/checkout-social-worker")]
@@ -254,6 +282,11 @@ public class TransactionsController(
       .Include(x => x.PatientPerson)
       .Include(x => x.RepresentativePerson)
       .Include(x => x.SocialWorkerUser)
+      .Include(x => x.LaneType)
+      .Include(x => x.Creditor)
+      .Include(x => x.Mode)
+      .Include(x => x.FundSource)
+        .ThenInclude(x => x!.Source)
       .FirstOrDefaultAsync(x => x.TransactionId == id, cancellationToken);
 
     if (transaction is null)

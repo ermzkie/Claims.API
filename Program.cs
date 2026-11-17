@@ -38,7 +38,6 @@ builder.Services.AddScoped<Claims.API.Services.UserAdminService>();
 builder.Services.AddScoped<Claims.API.Services.PersonService>();
 builder.Services.AddClaimsAuthentication(builder.Configuration);
 
-// Unhandled errors: short JSON message + reference id for the client, details in the log only
 builder.Services.AddExceptionHandler<Claims.API.Infrastructure.GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
 
@@ -51,13 +50,12 @@ builder.Services.AddClaimsOpenApi();
 
 var app = builder.Build();
 
-// First in the pipeline so it catches errors from everything after it
+// first, so it catches everything after it
 app.UseExceptionHandler();
 
 // Configure HTTP request pipeline
 if (app.Environment.IsDevelopment())
 {
-    // API docs page at /swagger (development only)
     app.UseClaimsSwaggerUi();
 }
 

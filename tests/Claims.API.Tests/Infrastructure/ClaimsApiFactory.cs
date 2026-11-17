@@ -30,7 +30,7 @@ public class ClaimsApiFactory : WebApplicationFactory<Program>
     builder.UseSetting("Jwt:SigningKey", SigningKey);
     builder.UseSetting("Jwt:Issuer", "Claims.API");
     builder.UseSetting("Jwt:Audience", "Claims.Web");
-    // Program.cs requires a connection string at startup; tests replace the DbContext with SQLite below.
+    // Program.cs needs one at startup, replaced with SQLite below
     builder.UseSetting("ConnectionStrings:DefaultConnection", "Server=unused;Database=unused");
 
     builder.ConfigureServices(services =>
@@ -54,7 +54,6 @@ public class ClaimsApiFactory : WebApplicationFactory<Program>
     return host;
   }
 
-  /// <summary>New scoped-lifetime context over the shared in-memory database, for arrange/assert.</summary>
   public ApplicationDbContext CreateDbContext() =>
     Services.CreateScope().ServiceProvider.GetRequiredService<ApplicationDbContext>();
 

@@ -31,7 +31,7 @@ public class TokenValidationTests
         new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)),
         SecurityAlgorithms.HmacSha256),
     };
-    // Defaults off: otherwise a missing exp/iat is silently filled from the real wall clock.
+    // otherwise a missing exp/iat is filled from the real clock
     return new JsonWebTokenHandler { SetDefaultTimesOnTokenCreation = false }.CreateToken(descriptor);
   }
 

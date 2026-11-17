@@ -58,7 +58,6 @@ public partial class UserAdminService
 
   public async Task<AdminResult> CreateAsync(int actorId, CreateUserDto dto)
   {
-    // Granting a privileged role requires Super Administrator
     var roleIds = (dto.RoleIds ?? []).Distinct().ToList();
     var roles = await _db.Roles.Where(r => roleIds.Contains(r.RoleId)).ToListAsync();
     if (GrantsPrivilegedRole(roles) && !await IsSuperAdministratorAsync(actorId))
@@ -128,7 +127,6 @@ public partial class UserAdminService
     }
     catch (DbUpdateException ex)
     {
-      // Only report "taken" if the username really exists now. Anything else is a real error.
       _db.ChangeTracker.Clear();
       if (await _db.Users.AnyAsync(u => u.Username.ToLower() == normalized))
       {
@@ -149,8 +147,6 @@ public partial class UserAdminService
       return NotFound();
     }
 
-    // Editing your own names is allowed.
-    // Otherwise a non-Super Administrator cannot touch a privileged account.
     if (id != actorId && HoldsPrivilegedRole(target) && !await IsSuperAdministratorAsync(actorId))
     {
       return Forbidden();
@@ -389,7 +385,7 @@ public partial class UserAdminService
   private static AdminResult NotFound() => new(AdminOutcome.NotFound, "User not found.");
   private static AdminResult Forbidden() => new(AdminOutcome.Forbidden, "You are not allowed to perform this action.");
 
-  // New Super Administrators are only set up directly in the database.
+  // Super Administrators are only made in the database
   private static AdminResult SuperAdministratorNotGrantable() =>
     new(AdminOutcome.Forbidden, "The Super Administrator role can't be given from the app.");
 

@@ -6,10 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Claims.API.Auth;
 
-/// <summary>
-/// Runs on every authenticated request: the token only proves identity; the user's
-/// current status and roles always come from the database.
-/// </summary>
+// status and roles come from the db, not the token
 public static class CurrentUserValidator
 {
   public static async Task ValidateAsync(TokenValidatedContext context)

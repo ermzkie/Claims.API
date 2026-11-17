@@ -5,8 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Claims.API.Infrastructure;
 
-// Catches any exception a controller doesn't handle. The client gets a short JSON message
-// and a reference id; the details (stack trace, SQL error) only go to the server log.
+// client gets a short message and a reference id, details stay in the log
 public class GlobalExceptionHandler : IExceptionHandler
 {
   private readonly ILogger<GlobalExceptionHandler> _logger;
@@ -16,7 +15,6 @@ public class GlobalExceptionHandler : IExceptionHandler
   public async ValueTask<bool> TryHandleAsync(
     HttpContext context, Exception exception, CancellationToken cancellationToken)
   {
-    // The caller closed the connection; nobody is waiting for an answer.
     if (exception is OperationCanceledException && context.RequestAborted.IsCancellationRequested)
     {
       _logger.LogDebug("Request cancelled by the client: {Method} {Path}", context.Request.Method, context.Request.Path);
@@ -27,7 +25,7 @@ public class GlobalExceptionHandler : IExceptionHandler
     var (status, message, code) = Describe(exception);
 
     var userId = context.User.FindFirst("sub")?.Value ?? "anonymous";
-    // Path only, never the query string: search terms can contain people's names.
+    // no query string: searches can contain people's names
     if (status >= 500)
       _logger.LogError(exception, "Request failed: {Method} {Path} user {UserId} ref {TraceId}",
         context.Request.Method, context.Request.Path, userId, traceId);
@@ -62,7 +60,6 @@ public class GlobalExceptionHandler : IExceptionHandler
       "server_error");
   }
 
-  // Connection failures and timeouts, possibly wrapped by EF Core.
   private static bool IsDatabaseUnavailable(Exception exception)
   {
     for (var e = exception; e is not null; e = e.InnerException)

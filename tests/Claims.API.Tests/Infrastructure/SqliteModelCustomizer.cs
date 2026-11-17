@@ -4,9 +4,7 @@ using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace Claims.API.Tests.Infrastructure;
 
-/// <summary>
-/// The production model uses SQL Server defaults such as (getdate()); SQLite needs CURRENT_TIMESTAMP instead.
-/// </summary>
+// SQLite has no getdate()
 public class SqliteModelCustomizer(ModelCustomizerDependencies dependencies)
   : RelationalModelCustomizer(dependencies)
 {

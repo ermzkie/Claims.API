@@ -52,7 +52,7 @@ public static class AuthPolicies
       .Configure<TimeProvider>((bearer, time) =>
       {
         bearer.TimeProvider = time;
-        // The handler's own lifetime check ignores JwtBearerOptions.TimeProvider, so compare against it explicitly.
+        // the built-in lifetime check ignores TimeProvider
         var skew = bearer.TokenValidationParameters.ClockSkew;
         bearer.TokenValidationParameters.LifetimeValidator = (notBefore, expires, _, _) =>
         {
@@ -65,8 +65,7 @@ public static class AuthPolicies
         bearer.Events.OnTokenValidated = CurrentUserValidator.ValidateAsync;
       });
 
-    // One shared base: authenticated and not pending a password change. Everything except
-    // AllowPendingPasswordChange derives from it, so the gate cannot be missed.
+    // shared base so the password-change gate can't be missed
     var basePolicy = new AuthorizationPolicyBuilder()
       .RequireAuthenticatedUser()
       .AddRequirements(new PasswordChangeRequirement())

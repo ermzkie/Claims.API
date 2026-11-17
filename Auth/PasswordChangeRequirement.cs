@@ -2,10 +2,6 @@ using Microsoft.AspNetCore.Authorization;
 
 namespace Claims.API.Auth;
 
-/// <summary>
-/// Fails for users who still must change their password. Part of the shared base policy,
-/// so every endpoint except those marked AllowPendingPasswordChange is gated by it.
-/// </summary>
 public class PasswordChangeRequirement : IAuthorizationRequirement
 {
 }

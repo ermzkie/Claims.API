@@ -3,6 +3,7 @@ using Claims.API.Auth;
 using Claims.API.Data;
 using Claims.API.DTOs.Persons;
 using Claims.API.Models;
+using Claims.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -23,7 +24,7 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
   private const string Reopened = "Reopened";
   private static readonly JsonSerializerOptions LogJson = new(JsonSerializerDefaults.Web);
 
-  // active persons with the same last, first and middle name and the same birthdate.
+  // active persons with the same name (spelling aside) and no different birthdates.
   // decision: none (still to review, default), same (waiting to be merged) or different
   [HttpGet("duplicates")]
   public async Task<ActionResult<PersonReviewPageDto<DuplicateGroupDto>>> Duplicates(
@@ -158,49 +159,42 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
     return latest.Where(kv => kv.Value is not null).ToDictionary(kv => kv.Key, kv => kv.Value!);
   }
 
+  // groups use the same "same person" rule as the new person check (PersonMatcher), so
+  // DELA CRUZ and DE LA CRUZ, or MA. NILDA and MA NILDA, land in one group
   private async Task<List<DuplicateGroupDto>> GroupsAsync(string? search)
   {
-    var named = context.People.AsNoTracking().Where(p => p.Status && p.LastName != null && p.FirstName != null);
-    var keys = await named
-      .GroupBy(p => new { p.LastName, p.FirstName, p.MiddleName, p.Birthdate })
-      .Where(g => g.Count() > 1)
-      .Select(g => g.Key)
+    var people = await context.People.AsNoTracking()
+      .Where(p => p.Status && p.LastName != null && p.FirstName != null)
+      .Select(p => new { p.PersonId, p.LastName, p.FirstName, p.MiddleName, p.Birthdate, Suffix = p.NameSuffix!.NameSuffixCode })
       .ToListAsync();
 
     var words = (search ?? "").ToUpperInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-    keys = keys
-      .Where(k => words.All(w => $"{k.LastName} {k.FirstName} {k.MiddleName}".ToUpperInvariant().Contains(w)))
-      .ToList();
-
-    var lastNames = keys.Select(k => k.LastName).Distinct().ToList();
-    var firstNames = keys.Select(k => k.FirstName).Distinct().ToList();
-    var candidates = await named
-      .Where(p => lastNames.Contains(p.LastName) && firstNames.Contains(p.FirstName))
-      .Select(p => new { p.PersonId, p.LastName, p.FirstName, p.MiddleName, p.Birthdate })
-      .ToListAsync();
-    // the database compares names ignoring capitals, so match the same way here
-    static string Key(string? last, string? first, string? middle, DateOnly? born) =>
-      $"{last?.Trim().ToUpperInvariant()}|{first?.Trim().ToUpperInvariant()}|{middle?.Trim().ToUpperInvariant()}|{born}";
-    var keySet = keys.Select(k => Key(k.LastName, k.FirstName, k.MiddleName, k.Birthdate)).ToHashSet();
-    var members = candidates
-      .Select(p => new { p.PersonId, p.LastName, p.FirstName, p.MiddleName, p.Birthdate, Key = Key(p.LastName, p.FirstName, p.MiddleName, p.Birthdate) })
-      .Where(p => keySet.Contains(p.Key))
-      .ToList();
-
-    var rows = (await RowsAsync(members.Select(p => p.PersonId).ToList())).ToDictionary(r => r.PersonId);
-
-    return members
-      .GroupBy(p => p.Key)
+    var groups = people
+      .Select(p => new { p.PersonId, p.LastName, p.FirstName, p.MiddleName, p.Birthdate, Parts = PersonMatcher.Parse(p.LastName, p.FirstName, p.MiddleName, p.Suffix) })
+      .GroupBy(p => PersonMatcher.GroupKey(p.Parts))
       .Where(g => g.Count() > 1)
+      // a missing birthdate matches any; two different birthdates are different people
+      .SelectMany(g => g.Select(p => p.Birthdate).OfType<DateOnly>().Distinct().Count() > 1
+        ? g.GroupBy(p => p.Birthdate).Select(b => b.ToList())
+        : [g.ToList()])
+      .Where(g => g.Count > 1)
+      .Where(g => words.All(w => g.Any(p => $"{p.LastName} {p.FirstName} {p.MiddleName}".ToUpperInvariant().Contains(w))))
+      .ToList();
+
+    var rows = (await RowsAsync(groups.SelectMany(g => g.Select(p => p.PersonId)).ToList())).ToDictionary(r => r.PersonId);
+
+    return groups
       .Select(g =>
       {
         var persons = g.Select(p => rows[p.PersonId])
           .OrderByDescending(r => r.Claims)
           .ThenBy(r => r.PersonId)
           .ToList();
-        var p = g.First();
+        // the heading shows the busiest record's spelling
+        var p = g.First(x => x.PersonId == persons[0].PersonId);
         return new DuplicateGroupDto(
-          p.LastName!.Trim(), p.FirstName!.Trim(), p.MiddleName?.Trim(), p.Birthdate, persons.Sum(r => r.Claims), persons, null);
+          p.LastName!.Trim(), p.FirstName!.Trim(), p.MiddleName?.Trim(), g.Select(x => x.Birthdate).Max(),
+          persons.Sum(r => r.Claims), persons, null);
       })
       .OrderByDescending(g => g.Claims)
       .ThenBy(g => g.LastName)

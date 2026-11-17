@@ -14,9 +14,11 @@ public enum PersonOutcome
   Ok,
   NotFound,
   Invalid,
+  Duplicate,
 }
 
-public record PersonResult(PersonOutcome Outcome, string? Message = null, PersonDto? Person = null);
+public record PersonResult(
+  PersonOutcome Outcome, string? Message = null, PersonDto? Person = null, IReadOnlyList<PersonMatchDto>? Matches = null);
 public record FamilyMemberResult(PersonOutcome Outcome, string? Message = null, FamilyMemberDto? FamilyMember = null);
 
 public partial class PersonService(ApplicationDbContext db, TimeProvider time)
@@ -192,8 +194,27 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       return new PersonResult(PersonOutcome.Invalid, error);
     }
 
-    db.People.Add(person);
-    await db.SaveChangesAsync();
+    await SaveLock.WaitAsync();
+    try
+    {
+      var (stop, confirmed) = await CheckDuplicateAsync(person, dto);
+      if (stop is not null)
+      {
+        return stop;
+      }
+
+      db.People.Add(person);
+      await db.SaveChangesAsync();
+      if (confirmed.Count > 0)
+      {
+        LogSavedAsDuplicate(actorId, person.PersonId, confirmed, dto.DuplicateReason);
+        await db.SaveChangesAsync();
+      }
+    }
+    finally
+    {
+      SaveLock.Release();
+    }
     return new PersonResult(PersonOutcome.Ok, Person: await GetAsync(person.PersonId));
   }
 
@@ -205,15 +226,42 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       return new PersonResult(PersonOutcome.NotFound, "Person not found.");
     }
 
+    var before = (person.LastName, person.FirstName, person.MiddleName, person.NameSuffixId, person.Birthdate);
     var error = await ApplyAsync(person, dto);
     if (error is not null)
     {
       return new PersonResult(PersonOutcome.Invalid, error);
     }
 
-    person.LastUpdatedBy = actorId;
-    person.DateLastUpdated = Now();
-    await db.SaveChangesAsync();
+    // only a changed name or birthdate is checked, so other fields of an existing duplicate can still be fixed
+    var renamed = before != (person.LastName, person.FirstName, person.MiddleName, person.NameSuffixId, person.Birthdate);
+    if (renamed)
+    {
+      await SaveLock.WaitAsync();
+    }
+    try
+    {
+      var (stop, confirmed) = renamed ? await CheckDuplicateAsync(person, dto) : (null, []);
+      if (stop is not null)
+      {
+        return stop;
+      }
+      if (confirmed.Count > 0)
+      {
+        LogSavedAsDuplicate(actorId, id, confirmed, dto.DuplicateReason);
+      }
+
+      person.LastUpdatedBy = actorId;
+      person.DateLastUpdated = Now();
+      await db.SaveChangesAsync();
+    }
+    finally
+    {
+      if (renamed)
+      {
+        SaveLock.Release();
+      }
+    }
     return new PersonResult(PersonOutcome.Ok, Person: await GetAsync(id));
   }
 
@@ -590,7 +638,11 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
   private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
   // Names are stored in capitals, like every record from the old system.
-  private static string? Name(string? value) => Clean(value)?.ToUpperInvariant();
+  private static string? Name(string? value) =>
+    Clean(value) is { } name ? Spaces().Replace(name, " ").ToUpperInvariant() : null;
+
+  [GeneratedRegex(@"\s+")]
+  private static partial Regex Spaces();
 
   private static string EscapeLike(string value) =>
     value.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_").Replace("[", "\\[");

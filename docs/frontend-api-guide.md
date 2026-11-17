@@ -208,6 +208,7 @@ pages added to `routes.js` are protected automatically.
 | GET                 | `/api/persons`                   | logged in           | Search, paged: `{ items, total, page, pageSize }`. Query: `search`, `cityMunicipalityId`, `barangayId`, `sexId`, `sector` (repeatable), `page`, `pageSize` (max 100) |
 | GET                 | `/api/persons/{id}`              | logged in           | One person with `family` (members with relationship, group, sex, birthdate, civil status, income, contact, occupation), `familyOf` (people who list this person as family) and the barangay's `cityMunicipalityId` / `provinceId` |
 | GET                 | `/api/persons/{id}/transactions` | logged in           | Paged transaction history where the person is the patient or representative; query: `page` (10 items per page) |
+| GET                 | `/api/persons/matches`           | logged in           | Persons who may be the one being typed in, up to 20: `personId`, `name`, `birthdate`, `address`, `claims`, `level` (`same` / `similar`), `reason`. Query: `lastName`, `firstName`, `middleName`, `nameSuffixId`, `birthdate`, `exceptPersonId` (the person being edited) |
 | POST                | `/api/persons`                   | logged in           | Create (201 with the person). Body below                                                      |
 | PUT                 | `/api/persons/{id}`              | logged in           | Replace **all** fields (send the whole person, not only what changed)                         |
 | POST                | `/api/persons/{id}/family`       | logged in           | Add a family member `{ familyPersonId, relationshipStatusId, remark? }` (201). Relationship required; no self links or duplicates |
@@ -251,7 +252,8 @@ Swagger is always the up-to-date list. This table is a summary.
 Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuffixId`, `sexId`,
 `civilStatusId`, `birthdate` (`"YYYY-MM-DD"`), `contactNo`, `skillOccupation`,
 `estimatedMonthlyIncome`, `barangayId`, `purokSubdivision`, `street`, `noBuildingName`,
-`isSeniorCitizen`, `isSoloParent`, `isPwd`, `isRr`, `is4P`.
+`isSeniorCitizen`, `isSoloParent`, `isPwd`, `isRr`, `is4P`, and `confirmDuplicate`,
+`duplicateReason` (see below).
 
 - **Search:** digits (with spaces, `+ - ( )`) match the person ID or part of the contact number;
   anything else matches first / middle / last name, every word must match. Filters combine with
@@ -266,6 +268,20 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
   returns that text as `sex`, `barangay` and `municipality`, and fills it from the IDs when a
   person is saved, so always show those fields and send the IDs. Filter and report by the IDs.
 - Validation errors come back as 400 with a `message` to show, like everything else.
+- **Same person check.** Saving a new person, or changing a person's name or birthdate, returns
+  **409** when an active person has the same name: `{ message, matches }`, `matches` shaped like
+  `/api/persons/matches`. Show the matches with a link to open each. To save anyway, send the same
+  body again with `confirmDuplicate: true` and a `duplicateReason` (required, up to 500
+  characters); it goes to the AuditLog (`Entity` = `Person`, `Action` = `SavedAsDuplicate`).
+  Changing other fields of a person who already has a duplicate is not blocked.
+- **How names are matched:** capitals, spaces, dots, hyphens, apostrophes and accents are ignored
+  (DELA CRUZ = DE LA CRUZ, CAÑETE = CANETE, MA. NILDA = MA NILDA). A JR, SR, II, III or IV typed
+  into the first or last name counts as the suffix. **Same:** same last, first and middle name and
+  suffix. **Similar** (shown, never blocks): only one has a middle name, the middle name is only an
+  initial, first and last name swapped, or only one has a suffix. Two different birthdates or
+  suffixes (JR vs SR) are never a match; a missing birthdate matches any. Almost no old records have
+  a birthdate, so in practice this is a name check.
+- Double spaces inside names are collapsed when saving.
 
 ### Things to know about the dashboard
 
@@ -287,12 +303,12 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
   (`SamePerson`, `NotSamePerson` or `Reopened`) in AuditLog (`Entity` = `DuplicateGroup`), with who,
   when and the remark. A decision can be changed straight from same to different and back.
 - `review.keepPersonId` on a "same" group is the record the others will be merged into.
-- **Possible duplicates** are active persons with the same last, first and middle name and the
-  same birthdate (a missing middle name or birthdate on both counts as the same). Each person shows
+- **Possible duplicates** are active persons matched as **same** by the rule under persons above
+  (spelling aside; a missing middle name on both counts as the same, and two different birthdates
+  split a group). Each person shows
   their claims as patient, claims as representative, last claim date and family links, so staff can
   tell which record to keep.
-- A marked group leaves the to-review list until someone new with the same name and birthdate
-  is added, then it shows again with everyone. `personIds` must be the whole current group.
+- A marked group leaves the to-review list until someone new with the same name is added, then it shows again with everyone. `personIds` must be the whole current group.
 - Claims from the old system count even though their status is 0; claims deleted in this app don't.
 
 ## Rules

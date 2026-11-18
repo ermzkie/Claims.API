@@ -215,6 +215,13 @@ pages added to `routes.js` are protected automatically.
 | PUT                 | `/api/persons/{id}/family/{familyCompId}` | logged in | Change the member or relationship, same body |
 | DELETE              | `/api/persons/{id}/family/{familyCompId}` | logged in | Remove a family member (204), optional body `{ remark }` |
 | GET                 | `/api/persons/{id}/family/history` | logged in | Family change log, newest first |
+| GET                 | `/api/transactions`              | logged in           | Claims, paged: `{ items, total, page, pageSize, totalPages }`. Query: `search`, `startDate`, `endDate`, `status` (`active` default, `cancelled`, `all`), `socialWorkerId`, `assistanceCode`, `sortBy`, `sortDirection`, `page`, `pageSize` (max 100) |
+| GET                 | `/api/transactions/{id}`         | logged in           | One claim |
+| GET                 | `/api/transactions/{id}/history` | logged in           | Change log, oldest first |
+| POST                | `/api/transactions/save`         | logged in           | Create (201) or edit (204, with `transactionId`). On edit, fields left out keep their value; blank text clears it. Money side is Social Worker / admins |
+| POST                | `/api/transactions/{id}/checkout-social-worker` | Social Worker / admins | Take the claim. Someone else has it: 409 with their name; send `{ takeOver: true, reason }` to take it over |
+| POST                | `/api/transactions/{id}/cancel`  | Admin / Super Admin | Cancel (204): `{ reason }` required. `DELETE /api/transactions/{id}?reason=` does the same |
+| POST                | `/api/transactions/{id}/restore` | Admin / Super Admin | Undo a cancel (204), optional `{ reason }` |
 | GET                 | `/api/dashboard`                 | logged in           | Home page figures for one month. Query: `year`, `month` (default this month)                  |
 | GET                 | `/api/dashboard/beneficiaries`   | logged in           | Who the claims were for. Query: `year`, `month`, `period` = `month` (default) or `year` (January up to the month) |
 | GET                 | `/api/dashboard/budget`          | Admin / Super Admin | Released and obligated per fund source from the finance system. Query: `year`               |
@@ -263,10 +270,22 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 
 ### Things to know about the dashboard
 
-- Old-system claims came over with status 0 but count. Only claims made here can be deleted.
+- Old-system claims came over with status 0 but count, until they are cancelled here.
 - Waiting = made here, not released, any month.
 - Beneficiaries are counted once. Sectors overlap, so they don't add up.
 - Budget is live from sysPFM (`getAnnualBalance`). 503 when finance is down: show it in the card.
+
+### Things to know about claims
+
+- New claims need a date, lane and patient. The queue number is per day and lane.
+- Frontliners can't set `amount`, `creditorId`, `fundSourceId`, `modeId`, `socialWorkerAssessment` or
+  `isReleased` (403).
+- Releasing needs an amount. A released claim is locked (409) until an admin saves `{ transactionId,
+  isReleased: false }` on its own.
+- The fund source must be for the claim's year. Only admins move a claim to another day.
+- Send dates as picked (`2026-11-17T09:00`). UTC (`...Z`) is turned into PH time.
+- Cancelled claims are hidden from lists and totals, and can't be edited.
+- Every change goes to AuditLog (`Transaction`).
 
 ### Things to know about fund sources
 

@@ -25,9 +25,9 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
       .Select(g => new
       {
         CreditorId = g.Key,
-        Claims = g.Count(t => t.Status || t.CreatedBy == null),
-        Amount = g.Where(t => t.Status || t.CreatedBy == null).Sum(t => t.Amount),
-        LastClaim = g.Where(t => t.Status || t.CreatedBy == null).Max(t => t.Date),
+        Claims = g.Count(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)),
+        Amount = g.Where(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)).Sum(t => t.Amount),
+        LastClaim = g.Where(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)).Max(t => t.Date),
         AllClaims = g.Count(),
       })
       .ToListAsync();
@@ -50,7 +50,7 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
     }
 
     var claims = context.Transactions.AsNoTracking().Where(t => t.CreditorId == id);
-    var active = claims.Where(t => t.Status || t.CreatedBy == null);
+    var active = claims.Where(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null));
 
     var byYear = await active
       .Where(t => t.Date != null)
@@ -83,7 +83,7 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
     }
 
     var counts = await context.Transactions.AsNoTracking()
-      .Where(t => t.CreditorId == id && (t.Status || t.CreatedBy == null) && t.AssistanceCode != null)
+      .Where(t => t.CreditorId == id && (t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)) && t.AssistanceCode != null)
       .GroupBy(t => t.AssistanceCode!)
       .Select(g => new { Code = g.Key, Claims = g.Count() })
       .ToListAsync();
@@ -182,7 +182,7 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
     var start = new DateTime(year, 1, 1);
     var end = start.AddYears(1);
     var months = await context.Transactions.AsNoTracking()
-      .Where(t => t.CreditorId == id && (t.Status || t.CreatedBy == null) && t.Date >= start && t.Date < end)
+      .Where(t => t.CreditorId == id && (t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)) && t.Date >= start && t.Date < end)
       .GroupBy(t => t.Date!.Value.Month)
       .Select(g => new { Month = g.Key, Claims = g.Count(), Amount = g.Sum(t => t.Amount) })
       .ToListAsync();
@@ -219,7 +219,7 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
     }
 
     var query = context.Transactions.AsNoTracking()
-      .Where(t => t.CreditorId == id && (t.Status || t.CreatedBy == null));
+      .Where(t => t.CreditorId == id && (t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)));
     if (f.From is not null)
     {
       var from = f.From.Value.Date;
@@ -386,8 +386,8 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
       ProgramName(programs, t.AssistanceCode),
       t.Natures.OfType<string>().ToList(),
       // old system never recorded releases
-      t.CreatedBy is null ? null : t.IsReleased,
-      t.Status || t.CreatedBy is null,
+      t.CreatedBy is null && t.LastUpdatedBy is null ? null : t.IsReleased,
+      t.Status || (t.CreatedBy is null && t.LastUpdatedBy is null),
       t.Patient is null || t.PatientPersonId is null
         ? null
         : new ClaimPersonDto(

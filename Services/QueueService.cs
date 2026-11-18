@@ -20,7 +20,8 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
   // seniors/PWD first, then VIP, then regular
   private static readonly string[] LaneOrder = ["S", "V", "R"];
 
-  public DateTime Now() => time.GetUtcNow().UtcDateTime.AddHours(8);
+  // office time with no zone, like the dates stored on claims
+  public DateTime Now() => DateTime.SpecifyKind(time.GetUtcNow().UtcDateTime.AddHours(8), DateTimeKind.Unspecified);
 
   private enum State { Waiting, Serving, NotServed, Done }
 

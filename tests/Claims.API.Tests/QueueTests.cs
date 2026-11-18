@@ -337,4 +337,15 @@ public class QueueTests
     Assert.Equal(HttpStatusCode.Conflict,
       (await o.Admin.PostAsJsonAsync($"/api/queue/{s1.TransactionId}/return", new { })).StatusCode);
   }
+
+  // office time without a zone, or the page shifts it another 8 hours
+  [Fact]
+  public async Task Today_ServerTimeIsOfficeTimeWithoutZone()
+  {
+    await using var o = await SetupAsync();
+
+    var json = await o.Front.GetStringAsync("/api/queue/today");
+
+    Assert.Contains("\"serverTime\":\"2026-11-10T16:00:00\"", json);
+  }
 }

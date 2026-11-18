@@ -5,6 +5,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Claims.API.Services;
 
+public enum QueueActionOutcome { Ok, NotFound, Forbidden, NotServing, Closed }
+
 // the queue is worked out from today's claims and their change log, no extra columns
 public class QueueService(ApplicationDbContext db, TimeProvider time)
 {
@@ -152,6 +154,30 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
       return id;
     }
     return null;
+  }
+
+  /// <summary>Takes the claim off its worker: back to the queue, or out of it as not served.</summary>
+  public async Task<QueueActionOutcome> LetGoAsync(
+    int id, int userId, bool isAdmin, string action, string? reason, CancellationToken ct)
+  {
+    var claim = await db.Transactions.FirstOrDefaultAsync(t => t.TransactionId == id, ct);
+    if (claim is null)
+      return QueueActionOutcome.NotFound;
+    if (claim.IsReleased == true || ClaimRules.IsCancelled(claim))
+      return QueueActionOutcome.Closed;
+    if (claim.SocialWorkerUserId is null)
+      return QueueActionOutcome.NotServing;
+    if (claim.SocialWorkerUserId != userId && !isAdmin)
+      return QueueActionOutcome.Forbidden;
+
+    var now = Now();
+    var previous = claim.SocialWorkerUserId;
+    claim.SocialWorkerUserId = null;
+    claim.LastUpdatedBy = userId;
+    claim.DateLastUpdated = now;
+    db.AuditLogs.Add(LogEntry(id, claim.PatientPersonId, action, previous, null, reason, userId, now));
+    await db.SaveChangesAsync(ct);
+    return QueueActionOutcome.Ok;
   }
 
   public static AuditLog LogEntry(

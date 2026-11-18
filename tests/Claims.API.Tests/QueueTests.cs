@@ -249,4 +249,92 @@ public class QueueTests
     var history = await o.Admin.GetFromJsonAsync<List<TransactionHistoryDto>>($"/api/transactions/{taken!.TransactionId}/history");
     Assert.Contains(history!, h => h.Action == "CheckedOut" && h.UserName == "Reyes, Ana");
   }
+
+  [Fact]
+  public async Task Return_PutsClaimAfterOthersInItsLane()
+  {
+    await using var o = await SetupAsync();
+    await FileAsync(o, o.S);
+    await FileAsync(o, o.S);
+    var s1 = await NextAsync(o.Worker);
+
+    var back = await o.Worker.PostAsJsonAsync($"/api/queue/{s1!.TransactionId}/return", new { reason = "went to the restroom" });
+
+    Assert.Equal(HttpStatusCode.NoContent, back.StatusCode);
+    var q = await TodayAsync(o.Front);
+    Assert.Equal("S2", q.NextQueueCode);
+    Assert.Equal(["S2", "S1"], Lane(q, "S").Waiting.Select(w => w.QueueCode));
+    Assert.Equal(0, q.Serving);
+  }
+
+  [Fact]
+  public async Task NotServed_LeavesQueue_TakeoverBringsItBack()
+  {
+    await using var o = await SetupAsync();
+    await FileAsync(o, o.S);
+    var s1 = await NextAsync(o.Worker);
+
+    var gone = await o.Worker.PostAsJsonAsync($"/api/queue/{s1!.TransactionId}/not-served", new { reason = "No show" });
+
+    Assert.Equal(HttpStatusCode.NoContent, gone.StatusCode);
+    var q = await TodayAsync(o.Front);
+    var item = Assert.Single(q.NotServed);
+    Assert.Equal("No show", item.Reason);
+    Assert.Equal("Ana Reyes", item.By);
+    Assert.Equal(0, q.Waiting);
+    Assert.Null(await NextAsync(o.Worker));
+
+    var back = await o.Worker2.PostAsJsonAsync($"/api/transactions/{s1.TransactionId}/checkout-social-worker", new { takeOver = true, reason = "client came back" });
+    Assert.Equal(HttpStatusCode.OK, back.StatusCode);
+    q = await TodayAsync(o.Front);
+    Assert.Empty(q.NotServed);
+    Assert.Equal("Ben Lim", Assert.Single(Lane(q, "S").Serving).SocialWorkerName);
+  }
+
+  [Fact]
+  public async Task QueueActions_OnlyHolderOrAdmin()
+  {
+    await using var o = await SetupAsync();
+    await FileAsync(o, o.S);
+    await FileAsync(o, o.S);
+    var s1 = await NextAsync(o.Worker);
+
+    Assert.Equal(HttpStatusCode.Forbidden,
+      (await o.Worker2.PostAsJsonAsync($"/api/queue/{s1!.TransactionId}/return", new { })).StatusCode);
+    Assert.Equal(HttpStatusCode.Forbidden,
+      (await o.Front.PostAsJsonAsync($"/api/queue/{s1.TransactionId}/not-served", new { reason = "x" })).StatusCode);
+    Assert.Equal(HttpStatusCode.NoContent,
+      (await o.Admin.PostAsJsonAsync($"/api/queue/{s1.TransactionId}/return", new { })).StatusCode);
+    // nobody has it now
+    Assert.Equal(HttpStatusCode.Conflict,
+      (await o.Admin.PostAsJsonAsync($"/api/queue/{s1.TransactionId}/return", new { })).StatusCode);
+    Assert.Equal(HttpStatusCode.NotFound,
+      (await o.Admin.PostAsJsonAsync("/api/queue/999999/return", new { })).StatusCode);
+  }
+
+  [Fact]
+  public async Task NotServed_NeedsReason()
+  {
+    await using var o = await SetupAsync();
+    await FileAsync(o, o.S);
+    var s1 = await NextAsync(o.Worker);
+
+    var empty = await o.Worker.PostAsJsonAsync($"/api/queue/{s1!.TransactionId}/not-served", new { reason = " " });
+    Assert.Equal(HttpStatusCode.BadRequest, empty.StatusCode);
+    Assert.Contains("Say why the client wasn't served.", await empty.Content.ReadAsStringAsync());
+    var tooLong = await o.Worker.PostAsJsonAsync($"/api/queue/{s1.TransactionId}/not-served", new { reason = new string('x', 501) });
+    Assert.Equal(HttpStatusCode.BadRequest, tooLong.StatusCode);
+  }
+
+  [Fact]
+  public async Task QueueActions_ReleasedClaim_Is409()
+  {
+    await using var o = await SetupAsync();
+    await FileAsync(o, o.S);
+    var s1 = await NextAsync(o.Worker);
+    await ReleaseAsync(o.Worker, s1!.TransactionId);
+
+    Assert.Equal(HttpStatusCode.Conflict,
+      (await o.Admin.PostAsJsonAsync($"/api/queue/{s1.TransactionId}/return", new { })).StatusCode);
+  }
 }

@@ -457,4 +457,37 @@ public class TransactionTests
       $"/api/transactions/{int.MaxValue}/checkout-social-worker", content: null);
     Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
   }
+
+  [Fact]
+  public async Task GetAllCurrentTransactionsOfSocialWorker_ReturnsOnlyTransactionsAssignedToCurrentUser()
+  {
+    await using var app = new ClaimsApiFactory();
+    await SeedRolesAsync(app);
+    var currentWorkerId = await CreateUserAsync(app, "current-worker", Password, "Social Worker");
+    var otherWorkerId = await CreateUserAsync(app, "other-worker", Password, "Social Worker");
+    using var client = await LoginAsAsync(app, "current-worker", Password);
+
+    int currentTransactionId;
+    await using (var db = app.CreateDbContext())
+    {
+      var currentTransaction = new Transaction
+      {
+        Status = true,
+        SocialWorkerUserId = currentWorkerId,
+      };
+      db.Transactions.AddRange(
+        currentTransaction,
+        new Transaction { Status = true, SocialWorkerUserId = otherWorkerId },
+        new Transaction { Status = true });
+      await db.SaveChangesAsync();
+      currentTransactionId = currentTransaction.TransactionId;
+    }
+
+    var transactions = await client.GetFromJsonAsync<List<TransactionResponseDto>>(
+      "/api/transactions/current-social-worker");
+
+    var transaction = Assert.Single(transactions!);
+    Assert.Equal(currentTransactionId, transaction.TransactionId);
+    Assert.Equal(currentWorkerId, transaction.SocialWorkerUserId);
+  }
 }

@@ -288,6 +288,13 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 - Cancelled claims are hidden from lists and totals, and can't be edited.
 - Every change goes to AuditLog (`Transaction`).
 
+### Things to know about reports
+
+- `GET /api/reports/transactions` and `/perennial-clients` (logged in) count the same claims as the dashboard:
+  old-system claims yes, cancelled no. Query: `assistanceCode`, `dateFrom`, `dateTo`.
+- The claims report stops at 5,000 claims: 400 with a message to narrow the dates.
+- `GET /api/balance/annual?year=` is admins only, 503 when finance is down.
+
 ### Things to know about fund sources
 
 - An appropriation (per year) or a trust fund. The dashboard budget reads them through `getAnnualBalance`.

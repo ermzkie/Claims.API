@@ -75,12 +75,11 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
     }).ToList();
   }
 
-  // never-returned claims by number, then returned ones by when they came back
+  // a returned client lines up again from the moment they came back: behind those waiting then, ahead of later arrivals
   private static IEnumerable<Row> InServingOrder(IEnumerable<Row> waiting) => waiting
     .OrderBy(r => LaneRank(r.Claim.LaneType))
     .ThenBy(r => r.Claim.LaneTypeId)
-    .ThenBy(r => r.ReturnedAt is null ? 0 : 1)
-    .ThenBy(r => r.ReturnedAt)
+    .ThenBy(r => r.ReturnedAt ?? r.Claim.DateCreated ?? r.Claim.Date)
     .ThenBy(r => r.Claim.QueueNo)
     .ThenBy(r => r.Claim.TransactionId);
 

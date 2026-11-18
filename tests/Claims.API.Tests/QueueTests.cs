@@ -257,6 +257,7 @@ public class QueueTests
     await FileAsync(o, o.S);
     await FileAsync(o, o.S);
     var s1 = await NextAsync(o.Worker);
+    o.App.Clock.Advance(TimeSpan.FromMinutes(5));
 
     var back = await o.Worker.PostAsJsonAsync($"/api/queue/{s1!.TransactionId}/return", new { reason = "went to the restroom" });
 
@@ -347,5 +348,38 @@ public class QueueTests
     var json = await o.Front.GetStringAsync("/api/queue/today");
 
     Assert.Contains("\"serverTime\":\"2026-11-10T16:00:00\"", json);
+  }
+
+  [Fact]
+  public async Task Return_StaysAheadOfClientsWhoArriveLater()
+  {
+    await using var o = await SetupAsync();
+    await FileAsync(o, o.S);
+    var s1 = await NextAsync(o.Worker);
+    o.App.Clock.Advance(TimeSpan.FromMinutes(10));
+    await o.Worker.PostAsJsonAsync($"/api/queue/{s1!.TransactionId}/return", new { });
+    o.App.Clock.Advance(TimeSpan.FromMinutes(10));
+    await FileAsync(o, o.S);
+
+    var q = await TodayAsync(o.Front);
+
+    Assert.Equal(["S1", "S2"], Lane(q, "S").Waiting.Select(w => w.QueueCode));
+  }
+
+  [Fact]
+  public async Task BringingBackANotServedClient_KeepsTheReason()
+  {
+    await using var o = await SetupAsync();
+    await FileAsync(o, o.S);
+    var s1 = await NextAsync(o.Worker);
+    await o.Worker.PostAsJsonAsync($"/api/queue/{s1!.TransactionId}/not-served", new { reason = "Went out for lunch" });
+
+    var back = await o.Worker2.PostAsJsonAsync($"/api/transactions/{s1.TransactionId}/checkout-social-worker", new { reason = "Client came back" });
+
+    Assert.Equal(HttpStatusCode.OK, back.StatusCode);
+    var history = await o.Admin.GetFromJsonAsync<List<TransactionHistoryDto>>($"/api/transactions/{s1.TransactionId}/history");
+    var last = history!.Last();
+    Assert.Equal("CheckedOut", last.Action);
+    Assert.Equal("Client came back", last.Remark);
   }
 }

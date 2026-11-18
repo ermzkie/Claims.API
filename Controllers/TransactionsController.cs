@@ -410,9 +410,9 @@ public class TransactionsController(
       }
       if (string.IsNullOrEmpty(reason))
         return BadRequest(new { message = "Give a reason for taking over the claim." });
-      if (reason.Length > MaxReason)
-        return BadRequest(new { message = $"Keep the reason under {MaxReason} characters." });
     }
+    if (reason?.Length > MaxReason)
+      return BadRequest(new { message = $"Keep the reason under {MaxReason} characters." });
 
     var now = Now();
     transaction.SocialWorkerUserId = currentUser.Id;
@@ -420,7 +420,8 @@ public class TransactionsController(
     Log(transaction, previous is null ? "CheckedOut" : "TakenOver",
       previous is null ? null : new Dictionary<string, object?> { ["socialWorkerUserId"] = previous },
       new Dictionary<string, object?> { ["socialWorkerUserId"] = currentUser.Id },
-      previous is null ? null : reason, now);
+      // a plain checkout can carry a note too, e.g. bringing back a client marked not served
+      string.IsNullOrEmpty(reason) ? null : reason, now);
     if (!await TrySaveAsync(cancellationToken))
       return Changed();
     await context.Entry(transaction).Reference(x => x.SocialWorkerUser).LoadAsync(cancellationToken);

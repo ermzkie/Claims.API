@@ -223,7 +223,7 @@ pages added to `routes.js` are protected automatically.
 | POST                | `/api/transactions/{id}/checkout-social-worker` | Social Worker / admins | Take the claim. Someone else has it: 409 with their name; send `{ takeOver: true, reason }` to take it over |
 | GET                 | `/api/queue/today`               | logged in           | Today's queue: `{ day, serverTime, nextQueueCode, lanes: [{ laneTypeId, code, name, waiting: [], serving: [], done }], notServed: [], waiting, serving, done }`. Lanes come in serving order |
 | POST                | `/api/queue/next`                | Social Worker / admins | Take the next client: 200 with the claim, 204 when nobody waits, 409 `{ message, transactionId }` while you still serve one |
-| POST                | `/api/queue/{id}/return`         | holder / admins     | Back to the queue, behind the others in its lane. Body `{ reason? }` (204) |
+| POST                | `/api/queue/{id}/return`         | holder / admins     | Back to the queue, behind those waiting now. Body `{ reason? }` (204) |
 | POST                | `/api/queue/{id}/not-served`     | holder / admins     | Out of today's queue. Body `{ reason }` required (204). A checkout brings it back |
 | GET                 | `/api/lookups/fund-sources?year=` | logged in           | Active fund sources for that year `[{ id, name, year }]` |
 | POST                | `/api/transactions/{id}/cancel`  | Admin / Super Admin | Cancel (204): `{ reason }` required. `DELETE /api/transactions/{id}?reason=` does the same |
@@ -304,7 +304,9 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 - Waiting = no social worker, not released. Being served = has one. Done = released. Not served = marked so
   with a reason.
 - One open client per worker: release it, return it or mark it not served before taking the next.
-- A returned client goes behind the others in its lane and keeps their number.
+- A returned client lines up again from when they were returned: behind those already waiting, ahead of
+  anyone who arrives later. They keep their number.
+- A client marked not served comes back with a checkout; send `{ reason }` and it is logged.
 
 ### Things to know about reports
 

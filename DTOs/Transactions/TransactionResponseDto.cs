@@ -5,6 +5,7 @@ public class TransactionResponseDto
   public int TransactionId { get; set; }
   public string? AssistanceCode { get; set; }
   public short? QueueNo { get; set; }
+  public string? QueueNoCode { get; set; }
   public string? RefNo { get; set; }
   public DateTime? Date { get; set; }
   public short? LaneTypeId { get; set; }

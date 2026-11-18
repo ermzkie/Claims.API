@@ -19,6 +19,8 @@ public class ClaimsApiFactory : WebApplicationFactory<Program>
 
   public FakeTimeProvider Clock { get; } = new(new DateTimeOffset(2026, 11, 10, 8, 0, 0, TimeSpan.Zero));
 
+  public FakeFinanceAccounts Finance { get; } = new();
+
   public ClaimsApiFactory()
   {
     _connection.Open();
@@ -30,7 +32,7 @@ public class ClaimsApiFactory : WebApplicationFactory<Program>
     builder.UseSetting("Jwt:SigningKey", SigningKey);
     builder.UseSetting("Jwt:Issuer", "Claims.API");
     builder.UseSetting("Jwt:Audience", "Claims.Web");
-    // Program.cs requires a connection string at startup; tests replace the DbContext with SQLite below.
+    // Program.cs needs one at startup, replaced with SQLite below
     builder.UseSetting("ConnectionStrings:DefaultConnection", "Server=unused;Database=unused");
 
     builder.ConfigureServices(services =>
@@ -43,6 +45,9 @@ public class ClaimsApiFactory : WebApplicationFactory<Program>
 
       services.RemoveAll<TimeProvider>();
       services.AddSingleton<TimeProvider>(Clock);
+
+      services.RemoveAll<Claims.API.Services.IFinanceAccounts>();
+      services.AddSingleton<Claims.API.Services.IFinanceAccounts>(Finance);
     });
   }
 
@@ -54,7 +59,6 @@ public class ClaimsApiFactory : WebApplicationFactory<Program>
     return host;
   }
 
-  /// <summary>New scoped-lifetime context over the shared in-memory database, for arrange/assert.</summary>
   public ApplicationDbContext CreateDbContext() =>
     Services.CreateScope().ServiceProvider.GetRequiredService<ApplicationDbContext>();
 

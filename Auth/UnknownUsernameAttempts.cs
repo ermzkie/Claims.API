@@ -2,11 +2,8 @@ using Microsoft.Extensions.Caching.Memory;
 
 namespace Claims.API.Auth;
 
-// Failed-login counter for usernames that don't exist, so they get the same countdown and lockout
-// as real accounts and the login response never reveals whether a username is real.
-// Like a real account's counter, entries never expire with time; otherwise waiting would reveal
-// which names are real. The size cap stops random usernames from growing memory without limit.
-// Counters reset when the API restarts.
+// fake lockout for unknown usernames so login never reveals which names are real.
+// no expiry (waiting would give it away); capped size, reset on restart
 public sealed class UnknownUsernameAttempts : IDisposable
 {
   private const int MaxTrackedUsernames = 100_000;

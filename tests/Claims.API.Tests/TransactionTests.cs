@@ -68,19 +68,25 @@ public class TransactionTests
 
     short firstNatureId;
     short secondNatureId;
+    short laneTypeId;
     await using (var db = app.CreateDbContext())
     {
       var firstNature = new NatureOfService { NatureDesc = "Medical", Status = true };
       var secondNature = new NatureOfService { NatureDesc = "Transportation", Status = true };
+      var laneType = new LaneType { LaneTypeCode = "NATURE", LaneTypeDesc = "Nature lane" };
       db.NatureOfServices.AddRange(firstNature, secondNature);
+      db.LaneTypes.Add(laneType);
       await db.SaveChangesAsync();
       firstNatureId = firstNature.NatureId;
       secondNatureId = secondNature.NatureId;
+      laneTypeId = laneType.LaneTypeId;
     }
 
     var create = await client.PostAsJsonAsync("/api/transactions/save", new
     {
       refNo = "REF-NATURE",
+      date = app.Clock.GetUtcNow().UtcDateTime.AddHours(8).Date,
+      laneTypeId,
       natureIds = new[] { firstNatureId, secondNatureId },
     });
     Assert.Equal(HttpStatusCode.Created, create.StatusCode);
@@ -100,6 +106,7 @@ public class TransactionTests
     var update = await client.PostAsJsonAsync("/api/transactions/save", new
     {
       transactionId = created.TransactionId,
+      laneTypeId,
       natureIds = new[] { secondNatureId },
     });
     Assert.Equal(HttpStatusCode.NoContent, update.StatusCode);
@@ -130,6 +137,7 @@ public class TransactionTests
     const int creditorId = 73;
     const int fundSourceId = 74;
     int patientPersonId;
+    var transactionDate = app.Clock.GetUtcNow().UtcDateTime.AddHours(8).Date;
     await using (var db = app.CreateDbContext())
     {
       var laneType = new LaneType { LaneTypeCode = "FAST", LaneTypeDesc = "Fast lane" };
@@ -158,6 +166,7 @@ public class TransactionTests
 
     var response = await client.PostAsJsonAsync("/api/transactions/save", new
     {
+      date = transactionDate,
       laneTypeId,
       patientPersonId,
       modeId,
@@ -197,6 +206,7 @@ public class TransactionTests
     {
       Assert.NotNull(transaction);
       Assert.Equal(laneTypeId, transaction.LaneTypeId);
+      Assert.Equal("FAST1", transaction.QueueNoCode);
       Assert.Equal("Fast lane", transaction.LaneTypeDesc);
       Assert.Equal("Creditor name", transaction.CreditorName);
       Assert.Equal("Mode description", transaction.ModeDesc);
@@ -213,32 +223,89 @@ public class TransactionTests
     using var client = await LoginAsAsync(app, "worker", Password);
 
     var today = app.Clock.GetUtcNow().UtcDateTime.AddHours(8).Date;
+    short firstLaneId;
+    short secondLaneId;
     await using (var db = app.CreateDbContext())
     {
-      db.Transactions.Add(new Transaction
+      var firstLane = new LaneType { LaneTypeCode = "A", LaneTypeDesc = "Lane A" };
+      var secondLane = new LaneType { LaneTypeCode = "B", LaneTypeDesc = "Lane B" };
+      db.LaneTypes.AddRange(firstLane, secondLane);
+      await db.SaveChangesAsync();
+      firstLaneId = firstLane.LaneTypeId;
+      secondLaneId = secondLane.LaneTypeId;
+
+      db.Transactions.AddRange(new Transaction
       {
         QueueNo = 25,
+        Date = today.AddHours(9),
+        LaneTypeId = firstLaneId,
         DateCreated = today.AddDays(-1).AddHours(12),
+        Status = true,
+      }, new Transaction
+      {
+        QueueNo = 40,
+        Date = today.AddHours(10),
+        LaneTypeId = secondLaneId,
+        DateCreated = today.AddDays(-2).AddHours(12),
         Status = true,
       });
       await db.SaveChangesAsync();
     }
 
-    var firstResponse = await client.PostAsJsonAsync("/api/transactions/save", new { refNo = "QUEUE-1" });
+    var firstResponse = await client.PostAsJsonAsync("/api/transactions/save", new
+    {
+      refNo = "QUEUE-1",
+      date = today.AddHours(11),
+      laneTypeId = firstLaneId,
+    });
     var first = await firstResponse.Content.ReadFromJsonAsync<TransactionResponseDto>();
-    var secondResponse = await client.PostAsJsonAsync("/api/transactions/save", new { refNo = "QUEUE-2" });
+    var secondResponse = await client.PostAsJsonAsync("/api/transactions/save", new
+    {
+      refNo = "QUEUE-2",
+      date = today.AddHours(12),
+      laneTypeId = firstLaneId,
+    });
     var second = await secondResponse.Content.ReadFromJsonAsync<TransactionResponseDto>();
+    var otherLaneResponse = await client.PostAsJsonAsync("/api/transactions/save", new
+    {
+      refNo = "QUEUE-OTHER-LANE",
+      date = today.AddHours(13),
+      laneTypeId = secondLaneId,
+    });
+    var otherLane = await otherLaneResponse.Content.ReadFromJsonAsync<TransactionResponseDto>();
 
     Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
     Assert.Equal(HttpStatusCode.Created, secondResponse.StatusCode);
-    Assert.Equal((short)1, first!.QueueNo);
-    Assert.Equal((short)2, second!.QueueNo);
+    Assert.Equal(HttpStatusCode.Created, otherLaneResponse.StatusCode);
+    Assert.Equal((short)26, first!.QueueNo);
+    Assert.Equal((short)27, second!.QueueNo);
+    Assert.Equal((short)41, otherLane!.QueueNo);
+
+    var missingDateResponse = await client.PostAsJsonAsync(
+      "/api/transactions/save",
+      new { laneTypeId = firstLaneId });
+    Assert.Equal(HttpStatusCode.BadRequest, missingDateResponse.StatusCode);
+
+    var missingLaneResponse = await client.PostAsJsonAsync(
+      "/api/transactions/save",
+      new { date = today });
+    Assert.Equal(HttpStatusCode.BadRequest, missingLaneResponse.StatusCode);
+
+    var invalidLaneResponse = await client.PostAsJsonAsync(
+      "/api/transactions/save",
+      new { date = today, laneTypeId = short.MaxValue });
+    Assert.Equal(HttpStatusCode.BadRequest, invalidLaneResponse.StatusCode);
 
     app.Clock.Advance(TimeSpan.FromDays(1));
     using var nextDayClient = await LoginAsAsync(app, "worker", Password);
     var nextDayResponse = await nextDayClient.PostAsJsonAsync(
       "/api/transactions/save",
-      new { refNo = "QUEUE-NEXT-DAY" });
+      new
+      {
+        refNo = "QUEUE-NEXT-DAY",
+        date = today.AddDays(1).AddHours(1),
+        laneTypeId = firstLaneId,
+      });
     Assert.Equal(HttpStatusCode.Created, nextDayResponse.StatusCode);
     var nextDay = await nextDayResponse.Content.ReadFromJsonAsync<TransactionResponseDto>();
 
@@ -247,13 +314,14 @@ public class TransactionTests
     var updateResponse = await nextDayClient.PostAsJsonAsync("/api/transactions/save", new
     {
       transactionId = first.TransactionId,
+      laneTypeId = firstLaneId,
       refNo = "QUEUE-1-UPDATED",
     });
     var updated = await nextDayClient.GetFromJsonAsync<TransactionResponseDto>(
       $"/api/transactions/{first.TransactionId}");
 
     Assert.Equal(HttpStatusCode.NoContent, updateResponse.StatusCode);
-    Assert.Equal((short)1, updated!.QueueNo);
+    Assert.Equal((short)26, updated!.QueueNo);
   }
 
   [Fact]

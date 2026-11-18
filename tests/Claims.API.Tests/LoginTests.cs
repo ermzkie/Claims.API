@@ -35,7 +35,7 @@ public class LoginTests
     var expiresAt = root.GetProperty("expiresAt").GetDateTime();
     var expected = app.Clock.GetLocalNow().DateTime.AddMinutes(480);
     Assert.True(Math.Abs((expiresAt - expected).TotalMinutes) <= 1);
-    // "mustChangePassword" legitimately contains the word, so look for password/hash properties specifically.
+    // mustChangePassword contains the word, so check exact names
     Assert.DoesNotContain("\"password\"", body, StringComparison.OrdinalIgnoreCase);
     Assert.DoesNotContain("passwordHash", body, StringComparison.OrdinalIgnoreCase);
     Assert.DoesNotContain("AQAAAA", body);

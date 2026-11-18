@@ -29,7 +29,6 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
   private const decimal MaxIncome = 99_999_999.99m;
   private static readonly DateOnly EarliestBirthdate = new(1900, 1, 1);
 
-  // Letters (any language, including ñ and accents), spaces, periods, apostrophes and hyphens.
   [GeneratedRegex(@"^[\p{L}\p{M}][\p{L}\p{M} .'\-]*$")]
   private static partial Regex NamePattern();
 
@@ -56,7 +55,6 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
 
     if (NumberSearchPattern().IsMatch(search))
     {
-      // Only digits (and phone punctuation): an ID or part of a contact number.
       var digits = new string(search.Where(char.IsAsciiDigit).ToArray());
       var id = digits.Length <= 9 ? int.Parse(digits) : -1;
       var contactPattern = $"%{digits}%";
@@ -68,7 +66,6 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
     }
     else
     {
-      // Every word must appear in the first, middle or last name; "Dela Cruz, Juan" works too.
       var words = search.Split([' ', ','], StringSplitOptions.RemoveEmptyEntries);
       foreach (var word in words)
       {
@@ -191,7 +188,7 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
 
   public async Task<PersonResult> CreateAsync(int actorId, SavePersonDto dto)
   {
-    // Set explicitly: re-generating the models from the database drops the `= true` default.
+    // re-scaffolding drops the = true default
     var person = new Person { CreatedBy = actorId, Status = true };
     var error = await ApplyAsync(person, dto);
     if (error is not null)
@@ -238,7 +235,7 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       return new PersonResult(PersonOutcome.Invalid, error);
     }
 
-    // only a changed name or birthdate is checked, so other fields of an existing duplicate can still be fixed
+    // only check renames, so existing duplicates can still be edited
     var renamed = before != (person.LastName, person.FirstName, person.MiddleName, person.NameSuffixId, person.Birthdate);
     if (renamed)
     {
@@ -282,7 +279,6 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       return new FamilyMemberResult(PersonOutcome.Invalid, error);
     }
 
-    // link and log entry save together
     await using var transaction = await db.Database.BeginTransactionAsync();
     var familyComposition = new FamilyComposition
     {
@@ -338,7 +334,6 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
     return new FamilyMemberResult(PersonOutcome.Ok, FamilyMember: familyMember);
   }
 
-  // soft delete (status false)
   public async Task<FamilyMemberResult> RemoveFamilyMemberAsync(int actorId, int personId, int familyCompId, string? remark)
   {
     if (RemarkError(remark) is { } error)
@@ -405,7 +400,6 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       f.FamilyPerson.ContactNo,
       f.FamilyPerson.SkillOccupation));
 
-  // reverse links: who lists this person as family
   private static IQueryable<FamilyMemberDto> FamilyOfProjection(IQueryable<FamilyComposition> query) =>
     query.Select(f => new FamilyMemberDto(
       f.FamilyCompId,
@@ -462,7 +456,6 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       DateCreated = Now(),
     });
 
-  // newest first; null when the person doesn't exist
   public async Task<List<FamilyChangeDto>?> FamilyHistoryAsync(int personId)
   {
     if (!await db.People.AnyAsync(p => p.PersonId == personId))
@@ -490,7 +483,6 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       .ToList();
   }
 
-  // Validates and copies the DTO onto the entity. Returns an error message, or null when valid.
   private async Task<string?> ApplyAsync(Person person, SavePersonDto dto)
   {
     var firstName = Name(dto.FirstName);
@@ -513,7 +505,7 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       return $"Text fields can be at most {MaxText} characters.";
     }
 
-    // Old records can hold other characters (commas, slashes); only typed or changed names are checked.
+    // old names can have commas and slashes, only check changed ones
     (string? Value, string? Stored)[] names =
       [(lastName, person.LastName), (firstName, person.FirstName), (middleName, person.MiddleName)];
     if (names.Any(n => n.Value is not null && n.Value != n.Stored && !NamePattern().IsMatch(n.Value)))
@@ -595,8 +587,7 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
     person.SkillOccupation = Clean(dto.SkillOccupation);
     person.EstimatedMonthlyIncome = dto.EstimatedMonthlyIncome;
 
-    // Reports read the text columns, and old records only have text. Fill the text from the
-    // chosen lookup; with nothing chosen, keep whatever text an old record already has.
+    // reports still read the text columns
     person.SexId = dto.SexId;
     if (sex is not null)
     {
@@ -642,7 +633,6 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
 
   private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-  // Names are stored in capitals, like every record from the old system.
   private static string? Name(string? value) =>
     Clean(value) is { } name ? Spaces().Replace(name, " ").ToUpperInvariant() : null;
 

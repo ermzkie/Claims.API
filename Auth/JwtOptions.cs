@@ -32,8 +32,7 @@ public class JwtOptionsValidator(IHostEnvironment environment) : IValidateOption
       return ValidateOptionsResult.Fail("Jwt:SigningKey must be configured and at least 32 bytes long.");
     }
 
-    // Developers may keep a token for weeks on their own machine; anywhere else a leaked
-    // token must stop working within a day.
+    // long dev tokens only on dev machines, a leaked token dies within a day elsewhere
     var max = environment.IsDevelopment()
       ? JwtOptions.MaxDevelopmentLifetimeMinutes
       : JwtOptions.MaxLifetimeMinutes;

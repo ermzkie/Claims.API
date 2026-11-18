@@ -3,7 +3,6 @@ using System.Text;
 
 namespace Claims.API.Services;
 
-// a name reduced to letters only, with the suffix read out of it
 public record NameParts(string Last, string First, string Middle, string? Suffix);
 
 public enum MatchLevel
@@ -15,14 +14,12 @@ public enum MatchLevel
 
 public record NameMatch(MatchLevel Level, string Reason);
 
-// one rule for "is this the same person", used by the new person check and the duplicates report
 public static class PersonMatcher
 {
   // V is left out: in old records a trailing V is usually a middle initial
   private static readonly HashSet<string> Suffixes = ["JR", "SR", "II", "III", "IV"];
   private static readonly char[] Separators = [' ', ',', '.'];
 
-  // DELA CRUZ = DE LA CRUZ = De La-Cruz, CAÑETE = CANETE, MA. NILDA = MA NILDA
   public static string Letters(string? value)
   {
     if (string.IsNullOrWhiteSpace(value))
@@ -45,7 +42,7 @@ public static class PersonMatcher
     return builder.ToString();
   }
 
-  // old records type the suffix into the name ("JOSE, JR."), so it's read from there too
+  // old records type the suffix into the name
   public static NameParts Parse(string? last, string? first, string? middle, string? suffixCode)
   {
     var (lastName, lastSuffix) = SplitSuffix(last);

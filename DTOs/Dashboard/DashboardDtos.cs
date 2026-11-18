@@ -49,7 +49,6 @@ public record DashboardBeneficiariesDto(
   IReadOnlyList<DashboardGroupDto> AgeGroups,
   IReadOnlyList<DashboardGroupDto> Sectors);
 
-// persons counted once; claims and amount are theirs within the period
 public record DashboardGroupDto(string Name, int Persons, int Claims, decimal Amount);
 
 public record DashboardBudgetDto(string? Source, int? Year, decimal Released, decimal Obligated);

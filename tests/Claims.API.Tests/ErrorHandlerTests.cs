@@ -18,7 +18,6 @@ public class ErrorHandlerTests
   private const string Pw = "Str0ng-Passw0rd!x";
   private const string SecretDetail = "internal-detail-that-must-not-leak";
 
-  // Makes the login endpoint crash with an unexpected exception.
   private sealed class BrokenClock : TimeProvider
   {
     public override DateTimeOffset GetUtcNow() => throw new InvalidOperationException(SecretDetail);

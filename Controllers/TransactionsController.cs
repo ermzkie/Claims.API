@@ -170,6 +170,16 @@ public class TransactionsController(
     SaveTransactionDto dto,
     CancellationToken cancellationToken)
   {
+    if (!dto.LaneTypeId.HasValue)
+      return BadRequest("Lane type is required.");
+
+    if (!await context.LaneTypes.AnyAsync(
+      x => x.LaneTypeId == dto.LaneTypeId.Value,
+      cancellationToken))
+    {
+      return BadRequest("Lane type was not found.");
+    }
+
     var now = time.GetUtcNow().UtcDateTime.AddHours(8);
     var transaction = dto.TransactionId.HasValue
       ? await context.Transactions
@@ -177,7 +187,17 @@ public class TransactionsController(
         .Include(x => x.SocialWorkerUser)
         .FirstOrDefaultAsync(x => x.TransactionId == dto.TransactionId.Value, cancellationToken)
       : null;
+    if (dto.TransactionId.HasValue && transaction is null)
+      return NotFound(new { message = "Transaction not found." });
+
     var isNew = transaction is null;
+    // dates are PH time; a page using toISOString() sends UTC
+    var date = dto.Date is { Kind: not DateTimeKind.Unspecified } d
+      ? DateTime.SpecifyKind(d.ToUniversalTime().AddHours(8), DateTimeKind.Unspecified)
+      : dto.Date;
+
+    if (isNew && !date.HasValue)
+      return BadRequest("Date is required to assign a queue number.");
 
     await using var dbTransaction = isNew || dto.NatureIds is not null
       ? await context.Database.BeginTransactionAsync(
@@ -187,9 +207,11 @@ public class TransactionsController(
 
     if (transaction is null)
     {
-      var queueDate = now.Date;
+      var queueDate = date!.Value.Date;
+      var nextDay = queueDate.AddDays(1);
       var lastQueueNo = await context.Transactions
-        .Where(x => x.DateCreated >= queueDate && x.DateCreated < queueDate.AddDays(1))
+        .Where(x => x.Date >= queueDate && x.Date < nextDay)
+        .Where(x => x.LaneTypeId == dto.LaneTypeId)
         .MaxAsync(x => x.QueueNo, cancellationToken);
 
       transaction = new Transaction
@@ -210,7 +232,7 @@ public class TransactionsController(
         transaction.IsReleased = dto.IsReleased.Value;
     }
 
-    transaction.Date = dto.Date;
+    transaction.Date = date;
     transaction.LaneTypeId = dto.LaneTypeId;
     transaction.PatientPersonId = dto.PatientPersonId;
     transaction.RepresentativePersonId = dto.RepresentativePersonId;

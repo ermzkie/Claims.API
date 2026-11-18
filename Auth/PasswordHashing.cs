@@ -4,8 +4,7 @@ using Microsoft.AspNetCore.Identity;
 
 namespace Claims.API.Auth;
 
-// User.Password keeps the scaffolded name of the DB column but always holds a hash from
-// Hasher.HashPassword, never the plain password.
+// User.Password keeps the scaffolded name but always holds a hash
 public static class PasswordHashing
 {
   private static readonly PasswordHasher<User> _hasher = new();
@@ -14,9 +13,6 @@ public static class PasswordHashing
 
   public static PasswordHasher<User> Hasher => _hasher;
 
-  /// <summary>
-  /// Hash of a random value, computed once. Verify against it when a username is unknown
-  /// so that login timing does not reveal which usernames exist.
-  /// </summary>
+  // verify unknown usernames against this so timing doesn't reveal real ones
   public static string DummyHash => _dummyHash.Value;
 }

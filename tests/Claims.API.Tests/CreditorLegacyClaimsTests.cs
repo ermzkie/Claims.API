@@ -6,8 +6,7 @@ using static Claims.API.Tests.Infrastructure.TestData;
 
 namespace Claims.API.Tests;
 
-// Claims imported from the old system have no CreatedBy; many came over with Status false (all of 2022)
-// and IsReleased false, which there means "not recorded", not "deleted" or "not released".
+// old-system claims: Status false and IsReleased false mean not recorded
 public class CreditorLegacyClaimsTests
 {
   private const string Pw = "Str0ng-Passw0rd!x";

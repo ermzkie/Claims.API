@@ -247,6 +247,104 @@ public class PersonTests
   }
 
   [Fact]
+  public async Task Update_ClearingSexAndBarangay_ClearsTheirText()
+  {
+    var (app, client, _) = await StartAsync();
+    await using (app)
+    {
+      var id = (await Json(await client.PostAsJsonAsync("/api/persons", NewPerson()))).GetProperty("personId").GetInt32();
+
+      var response = await client.PutAsJsonAsync($"/api/persons/{id}", new { firstName = "Juan", lastName = "Dela Cruz" });
+
+      Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+      var body = await Json(response);
+      Assert.Equal(JsonValueKind.Null, body.GetProperty("sex").ValueKind);
+      Assert.Equal(JsonValueKind.Null, body.GetProperty("barangay").ValueKind);
+      Assert.Equal(JsonValueKind.Null, body.GetProperty("municipality").ValueKind);
+    }
+  }
+
+  [Fact]
+  public async Task Update_WithOldVersion_IsRefused_AndKeepsTheOtherSave()
+  {
+    var (app, client, _) = await StartAsync();
+    await using (app)
+    {
+      var created = await Json(await client.PostAsJsonAsync("/api/persons", NewPerson()));
+      var id = created.GetProperty("personId").GetInt32();
+      var version = created.GetProperty("version").GetString();
+
+      var first = await client.PutAsJsonAsync($"/api/persons/{id}",
+        new { firstName = "Juan", lastName = "Dela Cruz", sexId = 1, contactNo = "09181111111", version });
+      Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+      var newVersion = (await Json(first)).GetProperty("version").GetString();
+      Assert.NotEqual(version, newVersion);
+
+      var stale = await client.PutAsJsonAsync($"/api/persons/{id}",
+        new { firstName = "Juan", lastName = "Dela Cruz", sexId = 1, street = "Gen. Luna", version });
+      Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+      Assert.True((await Json(stale)).GetProperty("stale").GetBoolean());
+
+      await using var db = app.CreateDbContext();
+      Assert.Equal("09181111111", (await db.People.AsNoTracking().SingleAsync(p => p.PersonId == id)).ContactNo);
+
+      var fresh = await client.PutAsJsonAsync($"/api/persons/{id}",
+        new { firstName = "Juan", lastName = "Dela Cruz", sexId = 1, contactNo = "09181111111", version = newVersion });
+      Assert.Equal(HttpStatusCode.OK, fresh.StatusCode);
+    }
+  }
+
+  [Fact]
+  public async Task Update_LogsOnlyChangedFields_InHistory()
+  {
+    var (app, client, _) = await StartAsync();
+    await using (app)
+    {
+      var id = (await Json(await client.PostAsJsonAsync("/api/persons", NewPerson()))).GetProperty("personId").GetInt32();
+      var same = NewPerson();
+      await client.PutAsJsonAsync($"/api/persons/{id}", same);
+      await client.PutAsJsonAsync($"/api/persons/{id}", new
+      {
+        firstName = "Juan", middleName = "Santos", lastName = "Dela Cruz", sexId = 1, barangayId = 100,
+        street = "Rizal St.", birthdate = "1980-05-17", isSeniorCitizen = false, contactNo = "09179999999",
+        estimatedMonthlyIncome = 8000m,
+      });
+
+      var history = await Json(await client.GetAsync($"/api/persons/{id}/history"));
+      Assert.Equal(1, history.GetArrayLength());
+      var entry = history[0];
+      Assert.Equal("Updated", entry.GetProperty("action").GetString());
+      using var oldValues = JsonDocument.Parse(entry.GetProperty("oldValues").GetString()!);
+      using var newValues = JsonDocument.Parse(entry.GetProperty("newValues").GetString()!);
+      Assert.Equal("09171234567", oldValues.RootElement.GetProperty("contactNo").GetString());
+      Assert.Equal("09179999999", newValues.RootElement.GetProperty("contactNo").GetString());
+      Assert.Single(newValues.RootElement.EnumerateObject());
+
+      Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/persons/999999/history")).StatusCode);
+    }
+  }
+
+  [Fact]
+  public async Task Update_InactivePerson_IsNotFound()
+  {
+    var (app, client, _) = await StartAsync();
+    await using (app)
+    {
+      int id;
+      await using (var db = app.CreateDbContext())
+      {
+        var p = new Person { Status = false, FirstName = "OLD", LastName = "RECORD" };
+        db.People.Add(p);
+        await db.SaveChangesAsync();
+        id = p.PersonId;
+      }
+
+      var response = await client.PutAsJsonAsync($"/api/persons/{id}", new { firstName = "Old", lastName = "Record" });
+      Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+  }
+
+  [Fact]
   public async Task Get_ReturnsPerson_404WhenMissing()
   {
     var (app, client, _) = await StartAsync();

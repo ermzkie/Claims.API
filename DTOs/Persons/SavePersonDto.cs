@@ -23,6 +23,12 @@ public class SavePersonDto
   public string? SkillOccupation { get; set; }
   public decimal? EstimatedMonthlyIncome { get; set; }
 
+  // the Version from GET; left out = no check
+  public string? Version { get; set; }
+
   public bool ConfirmDuplicate { get; set; }
   public string? DuplicateReason { get; set; }
 }
+
+public record PersonChangeDto(
+  int AuditLogId, string Action, string? OldValues, string? NewValues, string? Remark, string? ChangedBy, DateTime Date);

@@ -210,7 +210,8 @@ pages added to `routes.js` are protected automatically.
 | GET                 | `/api/persons/{id}/transactions` | logged in           | Claims as patient or representative, 10 per page. Query: `page` |
 | GET                 | `/api/persons/matches`           | logged in           | Possible matches (up to 20), `level` `same` / `similar`. Query: `lastName`, `firstName`, `middleName`, `nameSuffixId`, `birthdate`, `exceptPersonId` |
 | POST                | `/api/persons`                   | logged in           | Create (201 with the person). Body below                                                      |
-| PUT                 | `/api/persons/{id}`              | logged in           | Replace **all** fields (send the whole person, not only what changed)                         |
+| PUT                 | `/api/persons/{id}`              | logged in           | Replace **all** fields (send the whole person, not only what changed). Send back `version` from the GET: 409 with `stale: true` if someone saved in between |
+| GET                 | `/api/persons/{id}/history`      | logged in           | Edits, newest first: only the changed fields in `oldValues` / `newValues` (JSON) |
 | POST                | `/api/persons/{id}/family`       | logged in           | Add a family member `{ familyPersonId, relationshipStatusId, remark? }` (201). Relationship required; no self links or duplicates |
 | PUT                 | `/api/persons/{id}/family/{familyCompId}` | logged in | Change the member or relationship, same body |
 | DELETE              | `/api/persons/{id}/family/{familyCompId}` | logged in | Remove a family member (204), optional body `{ remark }` |

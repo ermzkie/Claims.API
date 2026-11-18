@@ -227,7 +227,7 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
     }
 
     var rows = await context.Transactions.AsNoTracking()
-      .Where(t => (t.Status || t.CreatedBy == null) && (t.PatientPersonId == id || t.RepresentativePersonId == id))
+      .Where(t => (t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)) && (t.PatientPersonId == id || t.RepresentativePersonId == id))
       .OrderByDescending(t => t.Date).ThenByDescending(t => t.TransactionId)
       .Take(take)
       .Select(t => new
@@ -325,7 +325,7 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
       })
       .ToListAsync();
 
-    var claims = context.Transactions.AsNoTracking().Where(t => t.Status || t.CreatedBy == null);
+    var claims = context.Transactions.AsNoTracking().Where(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null));
     var asPatient = await claims
       .Where(t => t.PatientPersonId != null && ids.Contains(t.PatientPersonId!.Value))
       .GroupBy(t => t.PatientPersonId!.Value)

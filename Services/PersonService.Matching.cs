@@ -69,7 +69,7 @@ public partial class PersonService
       })
       .ToListAsync();
 
-    var claims = db.Transactions.AsNoTracking().Where(t => t.Status || t.CreatedBy == null);
+    var claims = db.Transactions.AsNoTracking().Where(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null));
     var asPatient = await claims
       .Where(t => t.PatientPersonId != null && ids.Contains(t.PatientPersonId!.Value))
       .GroupBy(t => t.PatientPersonId!.Value)

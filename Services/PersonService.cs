@@ -159,6 +159,7 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
     const int pageSize = 10;
     var query = db.Transactions
       .AsNoTracking()
+      .Where(ClaimRules.Counted)
       .Where(transaction =>
         transaction.PatientPersonId == personId || transaction.RepresentativePersonId == personId);
     var total = await query.CountAsync(cancellationToken);

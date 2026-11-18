@@ -35,6 +35,19 @@ public class TransactionsController(
 
   private DateTime Now() => time.GetUtcNow().UtcDateTime.AddHours(8);
 
+  [HttpGet("current-social-worker")]
+  public async Task<ActionResult<List<TransactionResponseDto>>> GetAllCurrentTransactionsOfSocialWorker(
+    CancellationToken cancellationToken)
+  {
+    var transactions = await WithDetails(context.Transactions.AsNoTracking()
+        .Where(x => x.SocialWorkerUserId == currentUser.Id))
+      .OrderByDescending(x => x.Date)
+      .ThenByDescending(x => x.TransactionId)
+      .ToListAsync(cancellationToken);
+
+    return Ok(transactions.Select(TransactionResponseMapper.ToResponse).ToList());
+  }
+
   [HttpGet]
   public async Task<ActionResult<PagedResult<TransactionResponseDto>>> GetAll(
           [FromQuery] TransactionQueryParameters parameters)

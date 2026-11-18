@@ -5,6 +5,7 @@ using Claims.API.DTOs.Transactions;
 using Claims.API.Models;
 using Claims.API.Tests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using static Claims.API.Tests.Infrastructure.TestData;
 
 namespace Claims.API.Tests;
@@ -149,5 +150,103 @@ public class QueueTests
 
     Assert.Equal(HttpStatusCode.OK, (await o.Front.GetAsync("/api/queue/today")).StatusCode);
     Assert.Equal(HttpStatusCode.Unauthorized, (await o.App.CreateClient().GetAsync("/api/queue/today")).StatusCode);
+  }
+
+  private static async Task<TransactionResponseDto?> NextAsync(HttpClient client)
+  {
+    var response = await client.PostAsync("/api/queue/next", null);
+    Assert.True(response.StatusCode is HttpStatusCode.OK or HttpStatusCode.NoContent, response.StatusCode.ToString());
+    return response.StatusCode == HttpStatusCode.OK
+      ? await response.Content.ReadFromJsonAsync<TransactionResponseDto>()
+      : null;
+  }
+
+  private static async Task ReleaseAsync(HttpClient client, int id)
+  {
+    var response = await client.PostAsJsonAsync("/api/transactions/save",
+      new { transactionId = id, amount = 100m, assistanceCode = "AICS", isReleased = true });
+    Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+  }
+
+  [Fact]
+  public async Task TakeNext_FollowsLaneOrder()
+  {
+    await using var o = await SetupAsync();
+    await FileAsync(o, o.R);
+    await FileAsync(o, o.S);
+    await FileAsync(o, o.V);
+
+    var first = await NextAsync(o.Worker);
+    Assert.Equal("S1", first!.QueueNoCode);
+    await ReleaseAsync(o.Worker, first.TransactionId);
+    var second = await NextAsync(o.Worker);
+    Assert.Equal("V1", second!.QueueNoCode);
+    await ReleaseAsync(o.Worker, second.TransactionId);
+    Assert.Equal("R1", (await NextAsync(o.Worker))!.QueueNoCode);
+  }
+
+  [Fact]
+  public async Task TakeNext_OneOpenClaimPerWorker()
+  {
+    await using var o = await SetupAsync();
+    await FileAsync(o, o.S);
+    await FileAsync(o, o.S);
+    await NextAsync(o.Worker);
+
+    var again = await o.Worker.PostAsync("/api/queue/next", null);
+
+    Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+    Assert.Contains("You're still serving S1", await again.Content.ReadAsStringAsync());
+  }
+
+  [Fact]
+  public async Task TakeNext_NobodyWaiting_Is204()
+  {
+    await using var o = await SetupAsync();
+    Assert.Equal(HttpStatusCode.NoContent, (await o.Worker.PostAsync("/api/queue/next", null)).StatusCode);
+  }
+
+  [Fact]
+  public async Task TakeNext_Frontliner_Is403()
+  {
+    await using var o = await SetupAsync();
+    await FileAsync(o, o.S);
+    Assert.Equal(HttpStatusCode.Forbidden, (await o.Front.PostAsync("/api/queue/next", null)).StatusCode);
+  }
+
+  // the shared test database can't run two requests at once, so the race is set up by hand:
+  // worker2 takes S1 after this worker's list was worked out
+  [Fact]
+  public async Task TakeNext_TwoWorkersAtOnce_GetDifferentClaims()
+  {
+    await using var o = await SetupAsync();
+    var s1 = await FileAsync(o, o.S);
+    var s2 = await FileAsync(o, o.S);
+    using var scope = o.App.Services.CreateScope();
+    var queue = scope.ServiceProvider.GetRequiredService<Claims.API.Services.QueueService>();
+    var staleOrder = await queue.WaitingOrderAsync(default);
+
+    var worker2Got = await NextAsync(o.Worker2);
+    Assert.Equal(s1, worker2Got!.TransactionId);
+    await using var db = o.App.CreateDbContext();
+    var workerId = await db.Users.Where(u => u.Username == "worker").Select(u => u.UserId).SingleAsync();
+
+    var workerGot = await queue.TakeFirstFreeAsync(workerId, staleOrder, default);
+
+    Assert.Equal([s1, s2], staleOrder);
+    Assert.Equal(s2, workerGot);
+    Assert.Equal(1, await db.Transactions.CountAsync(t => t.SocialWorkerUserId == workerId));
+  }
+
+  [Fact]
+  public async Task TakeNext_IsLogged()
+  {
+    await using var o = await SetupAsync();
+    await FileAsync(o, o.S);
+
+    var taken = await NextAsync(o.Worker);
+
+    var history = await o.Admin.GetFromJsonAsync<List<TransactionHistoryDto>>($"/api/transactions/{taken!.TransactionId}/history");
+    Assert.Contains(history!, h => h.Action == "CheckedOut" && h.UserName == "Reyes, Ana");
   }
 }

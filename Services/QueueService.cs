@@ -126,6 +126,59 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
     return row is null ? null : (row.Claim.TransactionId, row.Code);
   }
 
+  /// <summary>Gives the next waiting claim to the worker; null when nobody is waiting.</summary>
+  public async Task<int?> TakeNextAsync(int userId, CancellationToken ct) =>
+    await TakeFirstFreeAsync(userId, await WaitingOrderAsync(ct), ct);
+
+  // the list can be out of date by the time we get here; the update below is what decides
+  public async Task<int?> TakeFirstFreeAsync(int userId, IReadOnlyList<int> order, CancellationToken ct)
+  {
+    foreach (var id in order)
+    {
+      var now = Now();
+      // only wins if nobody grabbed it in between, so two workers never get the same client
+      var taken = await db.Transactions
+        .Where(t => t.TransactionId == id && t.SocialWorkerUserId == null && t.IsReleased != true)
+        .ExecuteUpdateAsync(u => u
+          .SetProperty(t => t.SocialWorkerUserId, userId)
+          .SetProperty(t => t.LastUpdatedBy, userId)
+          .SetProperty(t => t.DateLastUpdated, now), ct);
+      if (taken == 0)
+        continue;
+
+      var patientId = await db.Transactions.Where(t => t.TransactionId == id).Select(t => t.PatientPersonId).FirstAsync(ct);
+      db.AuditLogs.Add(LogEntry(id, patientId, CheckedOut, null, userId, null, userId, now));
+      await db.SaveChangesAsync(ct);
+      return id;
+    }
+    return null;
+  }
+
+  public static AuditLog LogEntry(
+    int transactionId, int? patientId, string action, int? oldWorker, int? newWorker, string? remark, int userId, DateTime now) => new()
+  {
+    Entity = Entity,
+    EntityId = transactionId,
+    PersonId = patientId,
+    Action = action,
+    OldValues = oldWorker is null ? null : System.Text.Json.JsonSerializer.Serialize(new { socialWorkerUserId = oldWorker }),
+    NewValues = newWorker is null ? null : System.Text.Json.JsonSerializer.Serialize(new { socialWorkerUserId = newWorker }),
+    Remark = remark,
+    UserId = userId,
+    DateCreated = now,
+  };
+
+  public Task<Transaction?> LoadAsync(int id, CancellationToken ct) => db.Transactions.AsNoTracking()
+    .Include(x => x.TransactionServices)
+    .Include(x => x.PatientPerson)
+    .Include(x => x.RepresentativePerson)
+    .Include(x => x.SocialWorkerUser)
+    .Include(x => x.LaneType)
+    .Include(x => x.Creditor)
+    .Include(x => x.Mode)
+    .Include(x => x.FundSource).ThenInclude(x => x!.Source)
+    .FirstOrDefaultAsync(x => x.TransactionId == id, ct);
+
   private static QueueItemDto Item(Row r)
   {
     var c = r.Claim;

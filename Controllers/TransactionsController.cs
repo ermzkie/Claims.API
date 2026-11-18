@@ -187,9 +187,16 @@ public class TransactionsController(
         .Include(x => x.SocialWorkerUser)
         .FirstOrDefaultAsync(x => x.TransactionId == dto.TransactionId.Value, cancellationToken)
       : null;
-    var isNew = transaction is null;
+    if (dto.TransactionId.HasValue && transaction is null)
+      return NotFound(new { message = "Transaction not found." });
 
-    if (isNew && !dto.Date.HasValue)
+    var isNew = transaction is null;
+    // dates are PH time; a page using toISOString() sends UTC
+    var date = dto.Date is { Kind: not DateTimeKind.Unspecified } d
+      ? DateTime.SpecifyKind(d.ToUniversalTime().AddHours(8), DateTimeKind.Unspecified)
+      : dto.Date;
+
+    if (isNew && !date.HasValue)
       return BadRequest("Date is required to assign a queue number.");
 
     await using var dbTransaction = isNew || dto.NatureIds is not null
@@ -200,7 +207,7 @@ public class TransactionsController(
 
     if (transaction is null)
     {
-      var queueDate = dto.Date!.Value.Date;
+      var queueDate = date!.Value.Date;
       var nextDay = queueDate.AddDays(1);
       var lastQueueNo = await context.Transactions
         .Where(x => x.Date >= queueDate && x.Date < nextDay)
@@ -225,7 +232,7 @@ public class TransactionsController(
         transaction.IsReleased = dto.IsReleased.Value;
     }
 
-    transaction.Date = dto.Date;
+    transaction.Date = date;
     transaction.LaneTypeId = dto.LaneTypeId;
     transaction.PatientPersonId = dto.PatientPersonId;
     transaction.RepresentativePersonId = dto.RepresentativePersonId;

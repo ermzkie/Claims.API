@@ -1,0 +1,153 @@
+using Claims.API.Data;
+using Claims.API.DTOs.Queue;
+using Claims.API.Models;
+using Microsoft.EntityFrameworkCore;
+
+namespace Claims.API.Services;
+
+// the queue is worked out from today's claims and their change log, no extra columns
+public class QueueService(ApplicationDbContext db, TimeProvider time)
+{
+  public const string Entity = "Transaction";
+  public const string CheckedOut = "CheckedOut";
+  public const string TakenOver = "TakenOver";
+  public const string ReturnedToQueue = "ReturnedToQueue";
+  public const string NotServed = "NotServed";
+  private static readonly string[] QueueActions = [CheckedOut, TakenOver, ReturnedToQueue, NotServed];
+
+  // seniors/PWD first, then VIP, then regular
+  private static readonly string[] LaneOrder = ["S", "V", "R"];
+
+  public DateTime Now() => time.GetUtcNow().UtcDateTime.AddHours(8);
+
+  private enum State { Waiting, Serving, NotServed, Done }
+
+  private sealed record Log(int TransactionId, string Action, string? Remark, string? By, DateTime At, int Id);
+
+  private sealed record Row(Transaction Claim, State State, Log? Latest, DateTime? Since, DateTime? ReturnedAt)
+  {
+    public string Code => $"{Claim.LaneType?.LaneTypeCode}{Claim.QueueNo}";
+  }
+
+  private static int LaneRank(LaneType? lane)
+  {
+    var i = Array.IndexOf(LaneOrder, lane?.LaneTypeCode?.Trim().ToUpperInvariant());
+    return i < 0 ? LaneOrder.Length : i;
+  }
+
+  private async Task<List<Row>> TodayRowsAsync(CancellationToken ct)
+  {
+    var day = Now().Date;
+    var nextDay = day.AddDays(1);
+    var claims = await db.Transactions.AsNoTracking()
+      .Where(ClaimRules.Counted)
+      .Where(t => t.Date >= day && t.Date < nextDay && t.LaneTypeId != null)
+      .Include(t => t.LaneType)
+      .Include(t => t.PatientPerson)
+      .Include(t => t.SocialWorkerUser)
+      .Include(t => t.TransactionServices).ThenInclude(s => s.Nature)
+      .ToListAsync(ct);
+
+    var ids = claims.Select(c => c.TransactionId).ToList();
+    var logs = (await db.AuditLogs.AsNoTracking()
+        .Where(a => a.Entity == Entity && ids.Contains(a.EntityId) && QueueActions.Contains(a.Action))
+        .Select(a => new { a.EntityId, a.Action, a.Remark, a.DateCreated, a.AuditLogId, a.User.Firstname, a.User.Lastname, a.User.Username })
+        .ToListAsync(ct))
+      .Select(a => new Log(a.EntityId, a.Action, a.Remark,
+        a.Firstname is null && a.Lastname is null ? a.Username : $"{a.Firstname} {a.Lastname}".Trim(),
+        a.DateCreated, a.AuditLogId))
+      .ToLookup(l => l.TransactionId);
+
+    return claims.Select(c =>
+    {
+      var mine = logs[c.TransactionId].OrderBy(l => l.At).ThenBy(l => l.Id).ToList();
+      var latest = mine.LastOrDefault();
+      var since = mine.LastOrDefault(l => l.Action is CheckedOut or TakenOver)?.At ?? c.DateLastUpdated;
+      var state = c.IsReleased == true ? State.Done
+        : c.SocialWorkerUserId is not null ? State.Serving
+        : latest?.Action == NotServed ? State.NotServed
+        : State.Waiting;
+      var returnedAt = latest?.Action == ReturnedToQueue ? latest.At : (DateTime?)null;
+      return new Row(c, state, latest, since, returnedAt);
+    }).ToList();
+  }
+
+  // never-returned claims by number, then returned ones by when they came back
+  private static IEnumerable<Row> InServingOrder(IEnumerable<Row> waiting) => waiting
+    .OrderBy(r => LaneRank(r.Claim.LaneType))
+    .ThenBy(r => r.Claim.LaneTypeId)
+    .ThenBy(r => r.ReturnedAt is null ? 0 : 1)
+    .ThenBy(r => r.ReturnedAt)
+    .ThenBy(r => r.Claim.QueueNo)
+    .ThenBy(r => r.Claim.TransactionId);
+
+  public async Task<List<int>> WaitingOrderAsync(CancellationToken ct) =>
+    InServingOrder((await TodayRowsAsync(ct)).Where(r => r.State == State.Waiting))
+      .Select(r => r.Claim.TransactionId)
+      .ToList();
+
+  public async Task<QueueTodayDto> TodayAsync(CancellationToken ct)
+  {
+    var rows = await TodayRowsAsync(ct);
+    var lanes = await db.LaneTypes.AsNoTracking().ToListAsync(ct);
+    var waiting = InServingOrder(rows.Where(r => r.State == State.Waiting)).ToList();
+
+    var laneDtos = lanes
+      .OrderBy(LaneRank).ThenBy(l => l.LaneTypeId)
+      .Select(l => new QueueLaneDto(
+        l.LaneTypeId,
+        l.LaneTypeCode?.Trim() ?? "",
+        l.LaneTypeDesc?.Trim() ?? "",
+        waiting.Where(r => r.Claim.LaneTypeId == l.LaneTypeId).Select(Item).ToList(),
+        rows.Where(r => r.State == State.Serving && r.Claim.LaneTypeId == l.LaneTypeId)
+          .OrderBy(r => r.Since).Select(Item).ToList(),
+        rows.Count(r => r.State == State.Done && r.Claim.LaneTypeId == l.LaneTypeId)))
+      .ToList();
+
+    var notServed = rows.Where(r => r.State == State.NotServed)
+      .OrderBy(r => r.Latest!.At).Select(Item).ToList();
+
+    return new QueueTodayDto(
+      DateOnly.FromDateTime(Now()),
+      Now(),
+      waiting.FirstOrDefault()?.Code,
+      laneDtos,
+      notServed,
+      waiting.Count,
+      rows.Count(r => r.State == State.Serving),
+      rows.Count(r => r.State == State.Done));
+  }
+
+  /// <summary>Today's open (not released) claim the worker is serving, if any.</summary>
+  public async Task<(int Id, string Code)?> OpenClaimOfAsync(int userId, CancellationToken ct)
+  {
+    var row = (await TodayRowsAsync(ct))
+      .FirstOrDefault(r => r.State == State.Serving && r.Claim.SocialWorkerUserId == userId);
+    return row is null ? null : (row.Claim.TransactionId, row.Code);
+  }
+
+  private static QueueItemDto Item(Row r)
+  {
+    var c = r.Claim;
+    var p = c.PatientPerson;
+    var name = p is null ? null
+      : string.Join(" ", new[] { p.LastName is null ? null : $"{p.LastName.Trim()},", p.FirstName?.Trim(), p.MiddleName?.Trim() }
+          .Where(x => !string.IsNullOrWhiteSpace(x)));
+    var worker = c.SocialWorkerUser is { } u
+      ? string.Join(" ", new[] { u.Firstname, u.Middlename, u.Lastname }.Where(x => !string.IsNullOrWhiteSpace(x)))
+      : null;
+    var notServed = r.State == State.NotServed;
+    return new QueueItemDto(
+      c.TransactionId,
+      r.Code,
+      c.PatientPersonId,
+      name,
+      c.TransactionServices.Where(s => s.Nature?.NatureDesc is not null).Select(s => s.Nature!.NatureDesc!.Trim()).ToList(),
+      c.DateCreated ?? c.Date,
+      c.SocialWorkerUserId,
+      worker,
+      r.State == State.Serving ? r.Since : null,
+      notServed ? r.Latest!.Remark : null,
+      notServed ? r.Latest!.By : null);
+  }
+}

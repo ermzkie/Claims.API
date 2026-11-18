@@ -53,11 +53,18 @@ public class TransactionTests
     Assert.True(created.Status);
     var transactionId = created.TransactionId;
 
+    await using (var db = app.CreateDbContext())
+    {
+      await db.Database.ExecuteSqlRawAsync("INSERT INTO Assistance (AssistanceID, AssistanceCode, AssistanceType) VALUES (1, 'AICS', 'AICS')");
+    }
+    await worker.PostAsync($"/api/transactions/{transactionId}/checkout-social-worker", null);
+
     var update = await worker.PostAsJsonAsync("/api/transactions/save", new
     {
       transactionId,
       amount = 200m,
       isReleased = true,
+      assistanceCode = "AICS",
     });
     Assert.Equal(HttpStatusCode.NoContent, update.StatusCode);
 

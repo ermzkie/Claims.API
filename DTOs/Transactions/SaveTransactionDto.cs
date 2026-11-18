@@ -19,5 +19,7 @@ public class SaveTransactionDto
   public string? SocialWorkerAssessment { get; set; }
   public string? Remarks { get; set; }
   public bool? IsReleased { get; set; }
+  // program code from /api/lookups/assistance-programs
+  public string? AssistanceCode { get; set; }
   public List<short>? NatureIds { get; set; }
 }

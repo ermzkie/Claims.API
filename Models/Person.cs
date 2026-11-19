@@ -75,6 +75,8 @@ public partial class Person
 
     public DateOnly? Birthdate { get; set; }
 
+    public bool BirthdateEstimated { get; set; }
+
     [StringLength(50)]
     [Unicode(false)]
     public string? ContactNo { get; set; }

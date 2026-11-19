@@ -19,6 +19,8 @@ public class SavePersonDto
   public bool? IsRr { get; set; }
   public bool? Is4P { get; set; }
   public DateOnly? Birthdate { get; set; }
+  // null keeps it while the date is unchanged; a new date without it is exact
+  public bool? BirthdateEstimated { get; set; }
   public string? ContactNo { get; set; }
   public string? SkillOccupation { get; set; }
   public decimal? EstimatedMonthlyIncome { get; set; }

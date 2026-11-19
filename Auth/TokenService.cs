@@ -23,10 +23,10 @@ public class TokenService
       SecurityAlgorithms.HmacSha256);
   }
 
-  public (string Token, DateTime ExpiresAt) CreateToken(int userId)
+  public (string Token, DateTime ExpiresAt) CreateToken(int userId, bool longLived = false)
   {
     var now = _timeProvider.GetUtcNow();
-    var lifetime = TimeSpan.FromMinutes(_options.LifetimeMinutes);
+    var lifetime = TimeSpan.FromMinutes(longLived ? JwtOptions.DisplayLifetimeMinutes : _options.LifetimeMinutes);
 
     var descriptor = new SecurityTokenDescriptor
     {

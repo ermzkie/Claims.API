@@ -72,9 +72,12 @@ public static class AuthPolicies
     var basePolicy = new AuthorizationPolicyBuilder()
       .RequireAuthenticatedUser()
       .AddRequirements(new PasswordChangeRequirement())
+      // every endpoint refuses a TV account unless it opts in (QueueDisplay below)
+      .AddRequirements(new DisplayOnlyRequirement())
       .Build();
 
     services.AddSingleton<IAuthorizationHandler, PasswordChangeHandler>();
+    services.AddSingleton<IAuthorizationHandler, DisplayOnlyHandler>();
     services.AddSingleton<IAuthorizationMiddlewareResultHandler, AuthorizationResultHandler>();
 
     services.AddAuthorizationBuilder()

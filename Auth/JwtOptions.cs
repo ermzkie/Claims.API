@@ -21,6 +21,8 @@ public class JwtOptions
   public const int MaxDevelopmentLifetimeMinutes = 43200;
 
   public int LifetimeMinutes { get; set; } = 480;
+  // the TV account: a sign-in at 7 am lasts the office day
+  public const int DisplayLifetimeMinutes = 960;
 }
 
 public class JwtOptionsValidator(IHostEnvironment environment) : IValidateOptions<JwtOptions>

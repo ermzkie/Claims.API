@@ -92,8 +92,8 @@ public class AuthService
     }
     await _db.SaveChangesAsync();
 
-    var (token, expiresAt) = _tokens.CreateToken(user.UserId);
     var current = (await GetCurrentUserAsync(user.UserId))!;
+    var (token, expiresAt) = _tokens.CreateToken(user.UserId, DisplayOnlyRequirement.IsDisplayOnly(current.Roles));
     return new LoginResult(LoginOutcome.Success, new LoginResponseDto
     {
       Token = token,

@@ -43,6 +43,7 @@ public class TransactionTests
       date = app.Clock.GetUtcNow().UtcDateTime.AddHours(8),
       laneTypeId,
       patientPersonId,
+      confirmSameDay = true,
     });
 
     Assert.Equal(HttpStatusCode.Created, create.StatusCode);
@@ -123,6 +124,7 @@ public class TransactionTests
       date = app.Clock.GetUtcNow().UtcDateTime.AddHours(8).Date,
       laneTypeId,
       patientPersonId,
+      confirmSameDay = true,
       natureIds = new[] { firstNatureId, secondNatureId },
     });
     Assert.Equal(HttpStatusCode.Created, create.StatusCode);
@@ -206,6 +208,7 @@ public class TransactionTests
       date = transactionDate,
       laneTypeId,
       patientPersonId,
+      confirmSameDay = true,
       modeId,
       fundSourceId,
       creditorId,
@@ -298,6 +301,7 @@ public class TransactionTests
     {
       refNo = "QUEUE-1",
       patientPersonId,
+      confirmSameDay = true,
       date = today.AddHours(11),
       laneTypeId = firstLaneId,
     });
@@ -306,6 +310,7 @@ public class TransactionTests
     {
       refNo = "QUEUE-2",
       patientPersonId,
+      confirmSameDay = true,
       date = today.AddHours(12),
       laneTypeId = firstLaneId,
     });
@@ -314,6 +319,7 @@ public class TransactionTests
     {
       refNo = "QUEUE-OTHER-LANE",
       patientPersonId,
+      confirmSameDay = true,
       date = today.AddHours(13),
       laneTypeId = secondLaneId,
     });
@@ -349,6 +355,7 @@ public class TransactionTests
       {
         refNo = "QUEUE-NEXT-DAY",
       patientPersonId,
+      confirmSameDay = true,
         date = today.AddDays(1).AddHours(1),
         laneTypeId = firstLaneId,
       });

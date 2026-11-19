@@ -81,6 +81,7 @@ public class QueueTests
       date,
       laneTypeId = lane,
       patientPersonId = o.PatientId,
+      confirmSameDay = true,
     });
     Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     return (await response.Content.ReadFromJsonAsync<TransactionResponseDto>())!.TransactionId;

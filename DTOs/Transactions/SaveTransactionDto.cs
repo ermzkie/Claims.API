@@ -21,5 +21,7 @@ public class SaveTransactionDto
   public bool? IsReleased { get; set; }
   // program code from /api/lookups/assistance-programs
   public string? AssistanceCode { get; set; }
+  // same person already open in today's queue; the front desk confirms a real second visit
+  public bool ConfirmSameDay { get; set; }
   public List<short>? NatureIds { get; set; }
 }

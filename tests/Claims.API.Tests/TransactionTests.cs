@@ -30,7 +30,7 @@ public class TransactionTests
     await using (var db = app.CreateDbContext())
     {
       var lane = new LaneType { LaneTypeCode = "R", LaneTypeDesc = "Regular" };
-      var patient = new Person { FirstName = "Test", LastName = "Patient", Status = true };
+      var patient = new Person { FirstName = "Test", LastName = "Patient", Status = true, Birthdate = new DateOnly(1970, 1, 1) };
       db.LaneTypes.Add(lane);
       db.People.Add(patient);
       await db.SaveChangesAsync();
@@ -109,7 +109,7 @@ public class TransactionTests
       var laneType = new LaneType { LaneTypeCode = "NATURE", LaneTypeDesc = "Nature lane" };
       db.NatureOfServices.AddRange(firstNature, secondNature);
       db.LaneTypes.Add(laneType);
-      var patient = new Person { FirstName = "Test", LastName = "Patient", Status = true };
+      var patient = new Person { FirstName = "Test", LastName = "Patient", Status = true, Birthdate = new DateOnly(1970, 1, 1) };
       db.People.Add(patient);
       await db.SaveChangesAsync();
       patientPersonId = patient.PersonId;
@@ -196,7 +196,7 @@ public class TransactionTests
         CreditorName = "Creditor name",
         Status = true,
       });
-      var patient = new Person { FirstName = "Test", LastName = "Patient", Status = true };
+      var patient = new Person { FirstName = "Test", LastName = "Patient", Status = true, Birthdate = new DateOnly(1970, 1, 1) };
       db.People.Add(patient);
       await db.SaveChangesAsync();
       laneTypeId = laneType.LaneTypeId;
@@ -274,7 +274,7 @@ public class TransactionTests
       await db.SaveChangesAsync();
       firstLaneId = firstLane.LaneTypeId;
       secondLaneId = secondLane.LaneTypeId;
-      var patient = new Person { FirstName = "Test", LastName = "Patient", Status = true };
+      var patient = new Person { FirstName = "Test", LastName = "Patient", Status = true, Birthdate = new DateOnly(1970, 1, 1) };
       db.People.Add(patient);
       await db.SaveChangesAsync();
       patientPersonId = patient.PersonId;

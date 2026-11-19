@@ -61,7 +61,7 @@ public class QueueTests
     var r = new LaneType { LaneTypeCode = "R", LaneTypeDesc = "Regular Lane" };
     var s = new LaneType { LaneTypeCode = "S", LaneTypeDesc = "Senior Citizen/PWD Lane" };
     var v = new LaneType { LaneTypeCode = "V", LaneTypeDesc = "Very Important Persons Lane" };
-    var patient = new Person { FirstName = "MARIA", MiddleName = "CRUZ", LastName = "SANTOS", Status = true };
+    var patient = new Person { FirstName = "MARIA", MiddleName = "CRUZ", LastName = "SANTOS", Status = true, Birthdate = new DateOnly(1958, 3, 1) };
     db.AddRange(r, s, v, patient);
     await db.SaveChangesAsync();
     // keyless table

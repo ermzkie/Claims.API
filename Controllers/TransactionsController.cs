@@ -234,7 +234,8 @@ public class TransactionsController(
       Date = date ?? transaction?.Date,
       LaneTypeId = dto.LaneTypeId ?? transaction?.LaneTypeId,
       PatientPersonId = dto.PatientPersonId ?? transaction?.PatientPersonId,
-      RepresentativePersonId = dto.RepresentativePersonId ?? transaction?.RepresentativePersonId,
+      RepresentativePersonId = dto.ClearRepresentative ? null : dto.RepresentativePersonId ?? transaction?.RepresentativePersonId,
+      Representative = dto.ClearRepresentative ? null : transaction?.Representative,
       FundSourceId = dto.FundSourceId ?? transaction?.FundSourceId,
       CreditorId = dto.CreditorId ?? transaction?.CreditorId,
       ModeId = dto.ModeId ?? transaction?.ModeId,
@@ -361,6 +362,7 @@ public class TransactionsController(
     transaction.LaneTypeId = next.LaneTypeId;
     transaction.PatientPersonId = next.PatientPersonId;
     transaction.RepresentativePersonId = next.RepresentativePersonId;
+    transaction.Representative = next.Representative;
     transaction.FundSourceId = next.FundSourceId;
     transaction.CreditorId = next.CreditorId;
     transaction.ModeId = next.ModeId;
@@ -549,6 +551,9 @@ public class TransactionsController(
       return "Patient is required.";
     if (Changed("patientPersonId") && !await context.People.AnyAsync(x => x.PersonId == next.PatientPersonId && x.Status, ct))
       return "Patient was not found.";
+    if (next.RepresentativePersonId is not null && next.RepresentativePersonId == next.PatientPersonId
+        && (Changed("representativePersonId") || Changed("patientPersonId")))
+      return "The representative can't be the client.";
     if (next.RepresentativePersonId is not null && Changed("representativePersonId")
         && !await context.People.AnyAsync(x => x.PersonId == next.RepresentativePersonId && x.Status, ct))
       return "Representative was not found.";
@@ -591,6 +596,10 @@ public class TransactionsController(
       return "Set the amount before releasing the claim.";
     if (next.IsReleased == true && current?.IsReleased != true && next.AssistanceCode is null)
       return "Set the program before releasing the claim.";
+    // every release, old claims too: this is how the missing birthdates get filled in
+    if (next.IsReleased == true && current?.IsReleased != true
+        && !await context.People.AnyAsync(p => p.PersonId == next.PatientPersonId && p.Birthdate != null, ct))
+      return "Set the client's birthdate or approximate age before releasing.";
 
     if (Changed("natureIds") && natureIds.Count > 0)
     {
@@ -608,6 +617,7 @@ public class TransactionsController(
     ["laneTypeId"] = t.LaneTypeId,
     ["patientPersonId"] = t.PatientPersonId,
     ["representativePersonId"] = t.RepresentativePersonId,
+    ["representative"] = Text(t.Representative, null),
     ["fundSourceId"] = t.FundSourceId,
     ["creditorId"] = t.CreditorId,
     ["modeId"] = t.ModeId,

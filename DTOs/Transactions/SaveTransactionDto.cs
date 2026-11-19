@@ -23,5 +23,7 @@ public class SaveTransactionDto
   public string? AssistanceCode { get; set; }
   // same person already open in today's queue; the front desk confirms a real second visit
   public bool ConfirmSameDay { get; set; }
+  // null keeps the representative, so removing one needs its own flag
+  public bool ClearRepresentative { get; set; }
   public List<short>? NatureIds { get; set; }
 }

@@ -303,6 +303,10 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 - Every change goes to AuditLog (`Transaction`).
 - A new claim for someone already open in that day's queue (not released, not cancelled) is 409
   `{ message, transactionId, queueNoCode, sameDay: true }`. Send `confirmSameDay: true` for a real second visit.
+- Releasing needs the client's birthdate (exact, or estimated from an approximate age: `birthdateEstimated` on the
+  person), every claim, old ones too.
+- `clearRepresentative: true` removes the representative (the linked person and the old free-text one). The
+  representative can't be the client.
 - `assistanceCode` (program) is a code from `/api/lookups/assistance-programs`, Social Worker / admins only.
   Releasing needs it, like the amount.
 - Money fields, program and release: only the social worker holding the claim, or an admin (403 otherwise:

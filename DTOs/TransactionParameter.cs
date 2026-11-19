@@ -3,6 +3,7 @@ public class TransactionQueryParameters
 {
   // Pagination
   public int Page { get; set; } = 1;
+  public int PageSize { get; set; } = 10;
 
   // Date filtering
   public DateTime? StartDate { get; set; }
@@ -11,8 +12,10 @@ public class TransactionQueryParameters
   // Search
   public string? Search { get; set; }
 
-  // Status filtering
+  // active (default), cancelled or all; true/false also work
   public string? Status { get; set; }
+  public int? SocialWorkerId { get; set; }
+  public string? AssistanceCode { get; set; }
 
   // Sorting
   public string SortBy { get; set; } = "Date";

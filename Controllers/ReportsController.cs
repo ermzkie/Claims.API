@@ -1,9 +1,10 @@
-
 using Claims.API.Data;
 using Claims.API.DTOs.Reports;
+using Microsoft.AspNetCore.Authorization;
+
+using Claims.API.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.Authorization;
 
 namespace Claims.API.Controllers;
 
@@ -13,6 +14,9 @@ namespace Claims.API.Controllers;
 public class ReportsController(ApplicationDbContext context)
     : ControllerBase
 {
+    // a bigger report needs narrower dates, one response can't carry all the claims
+    public const int MaxReportRows = 5000;
+
     // =====================================================
     // TRANSACTION REPORT
     // =====================================================
@@ -32,9 +36,10 @@ public class ReportsController(ApplicationDbContext context)
                 "Date From cannot be later than Date To.");
         }
 
+        // old-system claims have Status false but still count
         var query = context.Transactions
             .AsNoTracking()
-            .Where(x => x.Status);
+            .Where(ClaimRules.Counted);
 
         // Assistance Type filter
         if (!string.IsNullOrWhiteSpace(parameters.AssistanceCode))
@@ -62,6 +67,15 @@ public class ReportsController(ApplicationDbContext context)
                 x.Date < exclusiveEndDate);
         }
 
+        var count = await query.CountAsync();
+        if (count > MaxReportRows)
+        {
+            return BadRequest(new
+            {
+                message = $"This report has {count:N0} claims, more than {MaxReportRows:N0}. Narrow the dates or pick a program.",
+            });
+        }
+
         var records = await query
             .OrderByDescending(x => x.Date)
             .Select(x => new
@@ -73,13 +87,16 @@ public class ReportsController(ApplicationDbContext context)
                 x.PatientPersonId,
 
                 FirstName = x.PatientPerson != null
-                    ? x.PatientPerson.FirstName : null,
+                    ? x.PatientPerson.FirstName
+                    : null,
 
                 MiddleName = x.PatientPerson != null
-                    ? x.PatientPerson.MiddleName : null,
+                    ? x.PatientPerson.MiddleName
+                    : null,
 
                 LastName = x.PatientPerson != null
-                    ? x.PatientPerson.LastName : null,
+                    ? x.PatientPerson.LastName
+                    : null,
 
                 BarangayName =
                     x.PatientPerson != null &&
@@ -107,8 +124,7 @@ public class ReportsController(ApplicationDbContext context)
                 x.Representative,
                 x.Amount,
                 x.CreditorId,
-                x.IsReleased,
-                x.Status
+                x.IsReleased
             })
             .ToListAsync();
 
@@ -143,7 +159,8 @@ public class ReportsController(ApplicationDbContext context)
                 Amount = x.Amount,
                 CreditorId = x.CreditorId,
                 IsReleased = x.IsReleased,
-                Status = x.Status
+                // only counted claims are listed
+                Status = true
             }).ToList();
 
         return Ok(result);
@@ -169,18 +186,20 @@ public class ReportsController(ApplicationDbContext context)
                 "Date From cannot be later than Date To.");
         }
 
+        // Base query
         var query = context.Transactions
             .AsNoTracking()
+            .Where(ClaimRules.Counted)
             .Where(x =>
-                x.Status &&
                 x.PatientPerson != null &&
                 x.PatientPersonId.HasValue);
 
-        // Assistance Type filter
-        if (!string.IsNullOrWhiteSpace(parameters.AssistanceCode))
+        // Filter by Source of Assistance
+        if (parameters.SourceId.HasValue)
         {
             query = query.Where(x =>
-                x.AssistanceCode == parameters.AssistanceCode);
+                x.FundSource != null &&
+                x.FundSource.SourceId == parameters.SourceId.Value);
         }
 
         // Date From filter
@@ -202,15 +221,23 @@ public class ReportsController(ApplicationDbContext context)
                 x.Date < exclusiveEndDate);
         }
 
-        // Retrieve matching transactions and beneficiary details
+        // Retrieve transaction and beneficiary details
         var records = await query
             .Select(x => new
             {
-                // FIX: Convert nullable int? to int
                 PatientPersonId = x.PatientPersonId!.Value,
 
-                x.AssistanceCode,
-                x.Amount,
+                SourceId = x.FundSource != null
+                    ? x.FundSource.SourceId
+                    : (short?)null,
+
+                SourceDesc =
+                    x.FundSource != null &&
+                    x.FundSource.Source != null
+                    ? x.FundSource.Source.SourceDesc
+                    : null,
+
+                Amount = x.Amount,
 
                 FirstName = x.PatientPerson!.FirstName,
                 MiddleName = x.PatientPerson.MiddleName,
@@ -238,12 +265,13 @@ public class ReportsController(ApplicationDbContext context)
             })
             .ToListAsync();
 
-        // Group by beneficiary and assistance type
+        // Group by beneficiary and source of assistance
         var result = records
             .GroupBy(x => new
             {
                 x.PatientPersonId,
-                x.AssistanceCode
+                x.SourceId,
+                x.SourceDesc
             })
             .Select(group =>
             {
@@ -271,13 +299,13 @@ public class ReportsController(ApplicationDbContext context)
                         }.Where(s =>
                             !string.IsNullOrWhiteSpace(s))),
 
-                    AssistanceCode =
-                        group.Key.AssistanceCode ?? string.Empty,
+                    AssistanceType =
+                        group.Key.SourceDesc ?? "N/A",
 
                     AvailmentCount = group.Count(),
 
                     TotalAmount = group.Sum(x =>
-                        Convert.ToDecimal(x.Amount))
+                        x.Amount ?? 0m)
                 };
             })
             .OrderByDescending(x => x.AvailmentCount)

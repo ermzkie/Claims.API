@@ -294,7 +294,7 @@ public class DashboardController(ApplicationDbContext context, TimeProvider time
 
   // old-system claims came over with status false; only claims made here can be deleted
   private IQueryable<Transaction> CountedClaims() =>
-    context.Transactions.AsNoTracking().Where(t => t.Status || t.CreatedBy == null);
+    context.Transactions.AsNoTracking().Where(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null));
 
   // Assistance has a row per budget release
   private async Task<Dictionary<string, string?>> ProgramNamesAsync() =>

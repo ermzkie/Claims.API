@@ -56,7 +56,7 @@ public class FundSourcesController(
     }
 
     var rows = await context.Transactions.AsNoTracking()
-      .Where(t => t.FundSourceId == id && (t.Status || t.CreatedBy == null))
+      .Where(t => t.FundSourceId == id && (t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)))
       .OrderByDescending(t => t.Date).ThenByDescending(t => t.TransactionId)
       .Take(take)
       .Select(t => new
@@ -278,8 +278,8 @@ public class FundSourcesController(
         Program = f.Source!.SourceDesc,
         f.AppropriationId,
         f.TrustFundId,
-        Claims = f.Transactions.Count(t => t.Status || t.CreatedBy == null),
-        ClaimsAmount = f.Transactions.Where(t => t.Status || t.CreatedBy == null).Sum(t => t.Amount) ?? 0,
+        Claims = f.Transactions.Count(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)),
+        ClaimsAmount = f.Transactions.Where(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)).Sum(t => t.Amount) ?? 0,
         f.DateCreated,
         f.CreatedBy,
         f.DateLastUpdated,

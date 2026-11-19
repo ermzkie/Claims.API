@@ -1,4 +1,3 @@
-
 using Claims.API.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -21,21 +20,17 @@ public class AssistanceController : ControllerBase
     [HttpGet("types")]
     public async Task<IActionResult> GetAssistanceTypes()
     {
-        var assistanceTypes = await _context.Assistances
+        var assistanceTypes = await _context.SourceOfAssistances
             .AsNoTracking()
-            .Where(a =>
-                a.IsActive != false &&
-                a.AssistanceCode != null &&
-                a.AssistanceType != null &&
-                a.AssistanceCode.Trim() != "" &&
-                a.AssistanceType.Trim() != "")
-            .Select(a => new
+            .Where(x =>
+                x.SourceDesc != null &&
+                x.SourceDesc.Trim() != "")
+            .Select(x => new
             {
-                AssistanceCode = a.AssistanceCode!.Trim(),
-                AssistanceName = a.AssistanceType!.Trim()
+                SourceID = x.SourceId,
+                SourceDesc = x.SourceDesc!.Trim()
             })
-            .Distinct()
-            .OrderBy(a => a.AssistanceName)
+            .OrderBy(x => x.SourceDesc)
             .ToListAsync();
 
         return Ok(assistanceTypes);

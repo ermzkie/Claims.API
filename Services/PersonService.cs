@@ -15,6 +15,7 @@ public enum PersonOutcome
   NotFound,
   Invalid,
   Duplicate,
+  Stale,
 }
 
 public record PersonResult(
@@ -159,6 +160,7 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
     const int pageSize = 10;
     var query = db.Transactions
       .AsNoTracking()
+      .Where(ClaimRules.Counted)
       .Where(transaction =>
         transaction.PatientPersonId == personId || transaction.RepresentativePersonId == personId);
     var total = await query.CountAsync(cancellationToken);
@@ -222,13 +224,19 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
 
   public async Task<PersonResult> UpdateAsync(int actorId, int id, SavePersonDto dto)
   {
-    var person = await db.People.FirstOrDefaultAsync(p => p.PersonId == id);
+    var person = await db.People.FirstOrDefaultAsync(p => p.PersonId == id && p.Status);
     if (person is null)
     {
       return new PersonResult(PersonOutcome.NotFound, "Person not found.");
     }
+    if (dto.Version is not null && dto.Version != VersionOf(person))
+    {
+      return new PersonResult(PersonOutcome.Stale,
+        "Someone else changed this person while you were editing. Reload to see their changes, then edit again.");
+    }
 
     var before = (person.LastName, person.FirstName, person.MiddleName, person.NameSuffixId, person.Birthdate);
+    var oldValues = Snapshot(person);
     var error = await ApplyAsync(person, dto);
     if (error is not null)
     {
@@ -252,6 +260,7 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       {
         LogSavedAsDuplicate(actorId, id, confirmed, dto.DuplicateReason);
       }
+      LogChanges(actorId, id, oldValues, Snapshot(person));
 
       person.LastUpdatedBy = actorId;
       person.DateLastUpdated = Now();
@@ -587,18 +596,28 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
     person.SkillOccupation = Clean(dto.SkillOccupation);
     person.EstimatedMonthlyIncome = dto.EstimatedMonthlyIncome;
 
-    // reports still read the text columns
-    person.SexId = dto.SexId;
+    // reports still read the text columns; old rows may only have the text, so only clear it when an id is removed
     if (sex is not null)
     {
       person.Gender = sex.SexDesc;
     }
-    person.BarangayId = dto.BarangayId;
+    else if (person.SexId is not null)
+    {
+      person.Gender = null;
+    }
+    person.SexId = dto.SexId;
+
     if (barangay is not null)
     {
       person.Barangay = barangay.BarangayName;
       person.Municipality = barangay.Municipality;
     }
+    else if (person.BarangayId is not null)
+    {
+      person.Barangay = null;
+      person.Municipality = null;
+    }
+    person.BarangayId = dto.BarangayId;
     return null;
   }
 
@@ -628,8 +647,77 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
     SkillOccupation = p.SkillOccupation,
     EstimatedMonthlyIncome = p.EstimatedMonthlyIncome,
     DateCreated = p.DateCreated,
+    Version = VersionOf(p),
     Family = family,
   };
+
+  private static string VersionOf(Person p) =>
+    (p.DateLastUpdated?.Ticks ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+  private static Dictionary<string, object?> Snapshot(Person p) => new()
+  {
+    ["lastName"] = p.LastName,
+    ["firstName"] = p.FirstName,
+    ["middleName"] = p.MiddleName,
+    ["nameSuffixId"] = p.NameSuffixId,
+    ["sexId"] = p.SexId,
+    ["civilStatusId"] = p.CivilStatusId,
+    ["birthdate"] = p.Birthdate,
+    ["contactNo"] = p.ContactNo,
+    ["skillOccupation"] = p.SkillOccupation,
+    ["estimatedMonthlyIncome"] = p.EstimatedMonthlyIncome,
+    ["barangayId"] = p.BarangayId,
+    ["barangay"] = p.Barangay,
+    ["municipality"] = p.Municipality,
+    ["purokSubdivision"] = p.PurokSubdivision,
+    ["street"] = p.Street,
+    ["noBuildingName"] = p.NoBuildingName,
+    ["isSeniorCitizen"] = p.IsSeniorCitizen == true,
+    ["isSoloParent"] = p.IsSoloParent == true,
+    ["isPwd"] = p.IsPwd == true,
+    ["isRr"] = p.IsRr == true,
+    ["is4P"] = p.Is4P == true,
+  };
+
+  // only the fields that changed
+  private void LogChanges(int actorId, int personId, Dictionary<string, object?> before, Dictionary<string, object?> after)
+  {
+    var changed = after.Keys.Where(k => !Equals(before[k], after[k])).ToList();
+    if (changed.Count == 0)
+    {
+      return;
+    }
+    db.AuditLogs.Add(new AuditLog
+    {
+      Entity = PersonEntity,
+      EntityId = personId,
+      PersonId = personId,
+      Action = "Updated",
+      OldValues = JsonSerializer.Serialize(changed.ToDictionary(k => k, k => before[k]), LogJson),
+      NewValues = JsonSerializer.Serialize(changed.ToDictionary(k => k, k => after[k]), LogJson),
+      UserId = actorId,
+      DateCreated = Now(),
+    });
+  }
+
+  public async Task<List<PersonChangeDto>?> HistoryAsync(int personId)
+  {
+    if (!await db.People.AnyAsync(p => p.PersonId == personId))
+    {
+      return null;
+    }
+    var rows = await db.AuditLogs.AsNoTracking()
+      .Where(a => a.Entity == PersonEntity && a.EntityId == personId)
+      .OrderByDescending(a => a.DateCreated).ThenByDescending(a => a.AuditLogId)
+      .Select(a => new { a.AuditLogId, a.Action, a.OldValues, a.NewValues, a.Remark, a.DateCreated,
+        a.User.Lastname, a.User.Firstname, a.User.Username })
+      .ToListAsync();
+    return rows.Select(a => new PersonChangeDto(
+        a.AuditLogId, a.Action, a.OldValues, a.NewValues, a.Remark,
+        a.Lastname is null && a.Firstname is null ? a.Username : $"{a.Lastname}, {a.Firstname}".Trim(' ', ','),
+        a.DateCreated))
+      .ToList();
+  }
 
   private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 

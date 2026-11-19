@@ -29,6 +29,8 @@ public class PersonDto
   public string? SkillOccupation { get; set; }
   public decimal? EstimatedMonthlyIncome { get; set; }
   public DateTime DateCreated { get; set; }
+  // send back on save so we can tell if someone changed it meanwhile
+  public string Version { get; set; } = "";
   public IReadOnlyList<FamilyMemberDto> Family { get; set; } = [];
   public IReadOnlyList<FamilyMemberDto> FamilyOf { get; set; } = [];
 }

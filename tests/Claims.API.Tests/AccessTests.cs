@@ -164,4 +164,36 @@ public class AccessTests
     var r = await o.Both.PutAsJsonAsync($"/api/persons/{o.PersonId}", Basics("09171234567", income: 9500m));
     Assert.Equal(HttpStatusCode.OK, r.StatusCode);
   }
+
+  [Fact]
+  public async Task Frontliner_OldUntrimmedOccupation_IsNotAChange()
+  {
+    await using var o = await SetupAsync();
+    foreach (var stored in new[] { "FARMER ", "", "  " })
+    {
+      await using (var db = o.App.CreateDbContext())
+      {
+        var p = await db.People.FindAsync(o.PersonId);
+        p!.SkillOccupation = stored;
+        await db.SaveChangesAsync();
+      }
+      // the page sends back what it got
+      var r = await o.Front.PutAsJsonAsync($"/api/persons/{o.PersonId}", Basics("09171234567", job: stored));
+      Assert.True(r.StatusCode == HttpStatusCode.OK, $"stored '{stored}' gave {r.StatusCode}");
+    }
+  }
+
+  [Fact]
+  public async Task Frontliner_CreatesWithBasicsOnly()
+  {
+    await using var o = await SetupAsync();
+    var withIncome = await o.Front.PostAsJsonAsync("/api/persons", new { firstName = "Ana", lastName = "Reyes", estimatedMonthlyIncome = 5000m });
+    Assert.Equal(HttpStatusCode.Forbidden, withIncome.StatusCode);
+    var withJob = await o.Front.PostAsJsonAsync("/api/persons", new { firstName = "Ana", lastName = "Reyes", skillOccupation = "Vendor" });
+    Assert.Equal(HttpStatusCode.Forbidden, withJob.StatusCode);
+    var basics = await o.Front.PostAsJsonAsync("/api/persons", new { firstName = "Ana", lastName = "Reyes", contactNo = "09171234567" });
+    Assert.Equal(HttpStatusCode.Created, basics.StatusCode);
+    Assert.Equal(HttpStatusCode.Created,
+      (await o.Worker.PostAsJsonAsync("/api/persons", new { firstName = "Ben", lastName = "Lim", estimatedMonthlyIncome = 5000m })).StatusCode);
+  }
 }

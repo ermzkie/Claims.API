@@ -189,8 +189,13 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       (int)Math.Ceiling((double)total / pageSize));
   }
 
-  public async Task<PersonResult> CreateAsync(int actorId, SavePersonDto dto)
+  public async Task<PersonResult> CreateAsync(int actorId, SavePersonDto dto, bool basicsOnly = false)
   {
+    if (basicsOnly && (dto.CivilStatusId is not null || Clean(dto.SkillOccupation) is not null || dto.EstimatedMonthlyIncome is not null))
+    {
+      return new PersonResult(PersonOutcome.Forbidden,
+        "Civil status, occupation and income are filled in by the social worker.");
+    }
     // re-scaffolding drops the = true default
     var person = new Person { CreatedBy = actorId, Status = true };
     var error = await ApplyAsync(person, dto);
@@ -238,7 +243,7 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
 
     // the front desk keeps to the basics; only a real change counts, the page resends everything
     if (basicsOnly && (dto.CivilStatusId != person.CivilStatusId
-        || Clean(dto.SkillOccupation) != person.SkillOccupation
+        || Clean(dto.SkillOccupation) != Clean(person.SkillOccupation)
         || dto.EstimatedMonthlyIncome != person.EstimatedMonthlyIncome))
     {
       return new PersonResult(PersonOutcome.Forbidden,

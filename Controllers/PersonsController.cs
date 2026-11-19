@@ -58,7 +58,7 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
   [HttpPost]
   public async Task<ActionResult<PersonDto>> Create([FromBody] SavePersonDto dto)
   {
-    var result = await persons.CreateAsync(currentUser.Id, dto);
+    var result = await persons.CreateAsync(currentUser.Id, dto, BasicsOnly);
     return result.Outcome == PersonOutcome.Ok
       ? CreatedAtAction(nameof(Get), new { id = result.Person!.PersonId }, result.Person)
       : Map(result);

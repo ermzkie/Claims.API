@@ -576,8 +576,8 @@ public class TransactionsController(
 
   private async Task<IActionResult> CancelAsync(int id, string? reason, CancellationToken cancellationToken)
   {
-    if (!IsAdmin)
-      return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only admins can cancel claims." });
+    if (!IsAdmin && !currentUser.IsInRole(RoleNames.Frontliner))
+      return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only frontliners and admins can cancel claims." });
 
     var transaction = await context.Transactions.FirstOrDefaultAsync(x => x.TransactionId == id, cancellationToken);
     if (transaction is null)

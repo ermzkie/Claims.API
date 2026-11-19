@@ -32,3 +32,6 @@ public record QueueTodayDto(
   int Done);
 
 public record QueueReasonRequest(string? Reason);
+
+// optional desk of the computer making the call
+public record QueueCallRequest(int? DeskId);

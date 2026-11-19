@@ -1,6 +1,6 @@
 namespace Claims.API.DTOs.Transactions;
 
-public record CheckoutRequest(bool TakeOver = false, string? Reason = null);
+public record CheckoutRequest(bool TakeOver = false, string? Reason = null, int? DeskId = null);
 
 public record ReasonRequest(string? Reason);
 

@@ -23,7 +23,9 @@ public class QueueController(QueueService queue, ICurrentUser currentUser) : Con
     await queue.TodayAsync(cancellationToken);
 
   [HttpPost("next")]
-  public async Task<ActionResult<TransactionResponseDto>> Next(CancellationToken cancellationToken)
+  public async Task<ActionResult<TransactionResponseDto>> Next(
+    [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] QueueCallRequest? request,
+    CancellationToken cancellationToken)
   {
     if (!CanServe)
       return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only social workers and admins can take clients from the queue." });
@@ -38,7 +40,10 @@ public class QueueController(QueueService queue, ICurrentUser currentUser) : Con
       });
     }
 
-    var id = await queue.TakeNextAsync(currentUser.Id, cancellationToken);
+    if (request?.DeskId is { } deskId && !await queue.DeskInUseAsync(deskId, cancellationToken))
+      return BadRequest(new { message = "That desk isn't in use." });
+
+    var id = await queue.TakeNextAsync(currentUser.Id, request?.DeskId, cancellationToken);
     if (id is null)
       return NoContent();
 
@@ -56,6 +61,29 @@ public class QueueController(QueueService queue, ICurrentUser currentUser) : Con
   [HttpPost("{id:int}/not-served")]
   public Task<IActionResult> NotServed(int id, QueueReasonRequest request, CancellationToken cancellationToken) =>
     LetGoAsync(id, QueueService.NotServed, request.Reason, reasonRequired: true, cancellationToken);
+
+  [HttpPost("{id:int}/recall")]
+  public async Task<IActionResult> Recall(
+    int id,
+    [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] QueueCallRequest? request,
+    CancellationToken cancellationToken)
+  {
+    if (!CanServe)
+      return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only social workers and admins can call clients." });
+    if (request?.DeskId is { } deskId && !await queue.DeskInUseAsync(deskId, cancellationToken))
+      return BadRequest(new { message = "That desk isn't in use." });
+
+    return await queue.RecallAsync(id, currentUser.Id, IsAdmin, request?.DeskId, cancellationToken) switch
+    {
+      QueueActionOutcome.Ok => NoContent(),
+      QueueActionOutcome.NotFound => NotFound(new { message = "Transaction not found." }),
+      QueueActionOutcome.Forbidden => StatusCode(StatusCodes.Status403Forbidden,
+        new { message = "Only the social worker on this claim, or an admin, can call this client." }),
+      QueueActionOutcome.InApproval => Conflict(new { message = "This claim is waiting for approval." }),
+      QueueActionOutcome.NotServing => Conflict(new { message = "Nobody is serving this claim." }),
+      _ => Conflict(new { message = "This claim was cancelled." }),
+    };
+  }
 
   private async Task<IActionResult> LetGoAsync(
     int id, string action, string? reason, bool reasonRequired, CancellationToken cancellationToken)

@@ -31,7 +31,6 @@ public class LookupsController(ApplicationDbContext context) : ControllerBase
       .Select(x => new LookupItemDto(x.NameSuffixId, x.NameSuffixCode, x.NameSuffixCode ?? ""))
       .ToListAsync();
 
-  // sorted by group then id, for dropdown headings
   [HttpGet("relationship-statuses")]
   public async Task<ActionResult<List<LookupItemDto>>> RelationshipStatuses() =>
     (await context.RelationshipStatuses.AsNoTracking()
@@ -48,6 +47,13 @@ public class LookupsController(ApplicationDbContext context) : ControllerBase
       .Select(x => new LookupItemDto(x.ModeId, null, x.ModeDesc ?? ""))
       .ToListAsync();
 
+  [HttpGet("lane-types")]
+  public async Task<ActionResult<List<LookupItemDto>>> LaneTypes() =>
+    await context.LaneTypes.AsNoTracking()
+      .OrderBy(x => x.LaneTypeId)
+      .Select(x => new LookupItemDto(x.LaneTypeId, x.LaneTypeCode, x.LaneTypeDesc ?? ""))
+      .ToListAsync();
+
   [HttpGet("sources-of-assistance")]
   public async Task<ActionResult<List<LookupItemDto>>> SourcesOfAssistance() =>
     await context.SourceOfAssistances.AsNoTracking()
@@ -62,7 +68,7 @@ public class LookupsController(ApplicationDbContext context) : ControllerBase
       .Select(x => new LookupItemDto(x.ProvinceId, x.ProvinceCode, x.ProvinceName))
       .ToListAsync();
 
-  // Filter required: the full lists are 1,600+ cities and 42,000+ barangays.
+  // filter required, 42,000+ barangays
   [HttpGet("cities")]
   public async Task<ActionResult<List<LookupItemDto>>> Cities(int? provinceId)
   {
@@ -89,7 +95,7 @@ public class LookupsController(ApplicationDbContext context) : ControllerBase
       .ToListAsync();
   }
 
-  // Assistance has one row per budget period, so one entry per code
+  // Assistance has a row per budget period
   [HttpGet("assistance-programs")]
   public async Task<ActionResult<List<AssistanceProgramDto>>> AssistancePrograms() =>
     (await context.Assistances.AsNoTracking()

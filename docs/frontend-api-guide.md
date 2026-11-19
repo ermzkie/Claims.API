@@ -206,22 +206,35 @@ pages added to `routes.js` are protected automatically.
 | POST / PUT / DELETE | `/api/natureofservice[/{id}]`    | Admin / Super Admin | `{ natureDesc }`                                                                              |
 | GET                 | `/api/lookups/{list}`            | logged in           | Dropdown values `[{ id, code, name }]`: `sexes`, `civil-statuses`, `name-suffixes`, `relationship-statuses`, `modes-of-assistance`, `sources-of-assistance`, `provinces`, `cities?provinceId=`, `barangays?cityMunicipalityId=` |
 | GET                 | `/api/persons`                   | logged in           | Search, paged: `{ items, total, page, pageSize }`. Query: `search`, `cityMunicipalityId`, `barangayId`, `sexId`, `sector` (repeatable), `page`, `pageSize` (max 100) |
-| GET                 | `/api/persons/{id}`              | logged in           | One person with `family` (members with relationship, group, sex, birthdate, civil status, income, contact, occupation), `familyOf` (people who list this person as family) and the barangay's `cityMunicipalityId` / `provinceId` |
-| GET                 | `/api/persons/{id}/transactions` | logged in           | Paged transaction history where the person is the patient or representative; query: `page` (10 items per page) |
-| GET                 | `/api/persons/matches`           | logged in           | Persons who may be the one being typed in, up to 20: `personId`, `name`, `birthdate`, `address`, `claims`, `level` (`same` / `similar`), `reason`. Query: `lastName`, `firstName`, `middleName`, `nameSuffixId`, `birthdate`, `exceptPersonId` (the person being edited) |
+| GET                 | `/api/persons/{id}`              | logged in           | One person with `family`, `familyOf`, `cityMunicipalityId`, `provinceId` |
+| GET                 | `/api/persons/{id}/transactions` | logged in           | Claims as patient or representative, 10 per page. Query: `page` |
+| GET                 | `/api/persons/matches`           | logged in           | Possible matches (up to 20), `level` `same` / `similar`. Query: `lastName`, `firstName`, `middleName`, `nameSuffixId`, `birthdate`, `exceptPersonId` |
 | POST                | `/api/persons`                   | logged in           | Create (201 with the person). Body below                                                      |
-| PUT                 | `/api/persons/{id}`              | logged in           | Replace **all** fields (send the whole person, not only what changed)                         |
+| PUT                 | `/api/persons/{id}`              | logged in           | Replace **all** fields (send the whole person, not only what changed). Send back `version` from the GET: 409 with `stale: true` if someone saved in between |
+| GET                 | `/api/persons/{id}/history`      | logged in           | Edits, newest first: only the changed fields in `oldValues` / `newValues` (JSON) |
 | POST                | `/api/persons/{id}/family`       | logged in           | Add a family member `{ familyPersonId, relationshipStatusId, remark? }` (201). Relationship required; no self links or duplicates |
 | PUT                 | `/api/persons/{id}/family/{familyCompId}` | logged in | Change the member or relationship, same body |
 | DELETE              | `/api/persons/{id}/family/{familyCompId}` | logged in | Remove a family member (204), optional body `{ remark }` |
-| GET                 | `/api/persons/{id}/family/history` | logged in | Every add, change and remove, newest first: `action`, `old` / `new` (`member`, `relationship`), `remark`, `changedBy`, `date` |
+| GET                 | `/api/persons/{id}/family/history` | logged in | Family change log, newest first |
+| GET                 | `/api/transactions`              | logged in           | Claims, paged: `{ items, total, page, pageSize, totalPages }`. Query: `search`, `startDate`, `endDate`, `status` (`active` default, `cancelled`, `all`), `socialWorkerId`, `assistanceCode`, `sortBy`, `sortDirection`, `page`, `pageSize` (max 100) |
+| GET                 | `/api/transactions/{id}`         | logged in           | One claim |
+| GET                 | `/api/transactions/{id}/history` | logged in           | Change log, oldest first |
+| POST                | `/api/transactions/save`         | logged in           | Create (201) or edit (204, with `transactionId`). On edit, fields left out keep their value; blank text clears it. Money side is Social Worker / admins |
+| POST                | `/api/transactions/{id}/checkout-social-worker` | Social Worker / admins | Take the claim. Someone else has it: 409 with their name; send `{ takeOver: true, reason }` to take it over |
+| POST                | `/api/transactions/{id}/cancel`  | Admin / Super Admin | Cancel (204): `{ reason }` required. `DELETE /api/transactions/{id}?reason=` does the same |
+| POST                | `/api/transactions/{id}/restore` | Admin / Super Admin | Undo a cancel (204), optional `{ reason }` |
 | GET                 | `/api/dashboard`                 | logged in           | Home page figures for one month. Query: `year`, `month` (default this month)                  |
 | GET                 | `/api/dashboard/beneficiaries`   | logged in           | Who the claims were for. Query: `year`, `month`, `period` = `month` (default) or `year` (January up to the month) |
 | GET                 | `/api/dashboard/budget`          | Admin / Super Admin | Released and obligated per fund source from the finance system. Query: `year`               |
+| GET                 | `/api/fund-sources`              | Admin / Super Admin | Fund sources for a year: `{ year, years, financeAvailable, items }`; each item `fundSourceId`, `year`, `sourceId`, `program`, `kind` (`appropriation` / `trustFund`), `financeId`, `finance` (`id`, `code`, `name`, `amount`), `released`, `obligated`, `pending`, `original`, `supplemental`, `adjustments`, `claims`, `claimsAmount`, `addedOn`, `addedBy`, `changedOn`, `changedBy`. Query: `year` |
+| GET                 | `/api/fund-sources/{id}/claims`  | Admin / Super Admin | Latest claims charged to it: `transactionId`, `refNo`, `date`, `patientPersonId`, `patient`, `assistanceCode`, `program`, `creditorId`, `creditorName`, `amount`, `isReleased`. Query: `take` (1 to 100, default 20) |
+| GET                 | `/api/fund-sources/finance-accounts` | Admin / Super Admin | Accounts that paid aid: `id`, `code`, `name`, `amount`, `aidObligations`, `creditorPayments`, `paysAid`. Query: `kind` (`appropriation` needs `year`, or `trustFund`) |
+| POST / PUT          | `/api/fund-sources`, `/api/fund-sources/{id}` | Admin / Super Admin | `{ year, sourceId, appropriationId }` or `{ year, sourceId, trustFundId }` |
+| DELETE              | `/api/fund-sources/{id}`         | Admin / Super Admin | Remove (204), only when no claim uses it |
 | GET                 | `/api/person-review/duplicates`  | Admin / Super Admin | Possible duplicate persons, grouped, most claims first. Query: `search`, `decision` = `none` (to review, default), `same` or `different`, `page`, `pageSize` (max 100) |
 | GET                 | `/api/person-review/nameless`    | Admin / Super Admin | Persons with no last or first name, most claims first. Query: `page`, `pageSize` |
-| GET                 | `/api/person-review/persons/{id}/claims` | Admin / Super Admin | A person's latest claims as patient or representative, newest first: `role`, `otherPerson`, `program`, `creditorName`, `amount`, `socialWorker`. Query: `take` (1 to 50, default 10) |
-| POST                | `/api/person-review/duplicates/same` | Admin / Super Admin | Confirm a whole group is one person and which record to keep, to merge later (204): `{ personIds, keepPersonId, remark? }`. Send again with another `keepPersonId` to change it |
+| GET                 | `/api/person-review/persons/{id}/claims` | Admin / Super Admin | A person's latest claims. Query: `take` (1 to 50) |
+| POST                | `/api/person-review/duplicates/same` | Admin / Super Admin | Same person (204): `{ personIds, keepPersonId, remark? }` |
 | POST                | `/api/person-review/duplicates/not-same` | Admin / Super Admin | Mark a whole group as different people (204): `{ personIds, remark? }` |
 | POST                | `/api/person-review/duplicates/reopen` | Admin / Super Admin | Undo that, same body (204) |
 
@@ -234,82 +247,73 @@ Swagger is always the up-to-date list. This table is a summary.
 ### Things to know about accounts
 
 - Wrong password and unknown username give the same message on purpose.
-- After 10 wrong passwords the account is locked for 5 minutes (`code: locked_out`). An admin can
-  unlock it early with reset-password.
-- The last 3 tries before that warn in the message ("Invalid username or password. 3 attempts
-  left before the account is locked for 5 minutes."), and a locked account says how long to wait
-  ("Too many failed attempts. Try again in 5 minutes."). The login page just shows `message`.
-- Unknown usernames and deactivated accounts get the same messages and countdown, so the login
-  page never reveals which usernames exist.
-- A user with a temporary password can only change their password until they do. The login page
-  and `RequireAuth` already send them there.
-- If an admin deactivates someone or removes a role, it applies on that user's next request, even
-  if they are already logged in. `apiFetch` handles the 401 / 403.
-- `expiresAt` in the login response is server local time (Philippine time).
+- 10 wrong passwords lock the account for 5 minutes (`code: locked_out`). Reset-password unlocks it.
+  The message counts down the last 3 tries; just show `message`.
+- Temporary password: the user can only change it until they do.
+- Deactivating or removing a role applies on the user's next request.
+- `expiresAt` is Philippine time.
 
 ### Things to know about persons
 
 Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuffixId`, `sexId`,
 `civilStatusId`, `birthdate` (`"YYYY-MM-DD"`), `contactNo`, `skillOccupation`,
 `estimatedMonthlyIncome`, `barangayId`, `purokSubdivision`, `street`, `noBuildingName`,
-`isSeniorCitizen`, `isSoloParent`, `isPwd`, `isRr`, `is4P`, and `confirmDuplicate`,
-`duplicateReason` (see below).
+`isSeniorCitizen`, `isSoloParent`, `isPwd`, `isRr`, `is4P`, `confirmDuplicate`, `duplicateReason`.
 
-- **Search:** digits (with spaces, `+ - ( )`) match the person ID or part of the contact number;
-  anything else matches first / middle / last name, every word must match. Filters combine with
-  the text and with each other. `sector` is `senior`, `pwd`, `4ps` or `solo-parent`; a person
-  must have all the sectors given.
-- **Names** are saved in capitals. They may only contain letters (ñ and accents included), spaces,
-  `. ' -`. Old records with other characters (commas, slashes) can still be saved as long as the
-  name isn't changed.
-- **Contact no.:** digits, spaces, `+ - ( )`, with 7 to 15 digits. **Birthdate:** 1900 to today.
-  **Income:** 0 to 99,999,999.99, 2 decimals.
-- **Text vs IDs:** old records only have the sex, barangay and municipality as text. The API
-  returns that text as `sex`, `barangay` and `municipality`, and fills it from the IDs when a
-  person is saved, so always show those fields and send the IDs. Filter and report by the IDs.
-- Validation errors come back as 400 with a `message` to show, like everything else.
-- **Same person check.** Saving a new person, or changing a person's name or birthdate, returns
-  **409** when an active person has the same name: `{ message, matches }`, `matches` shaped like
-  `/api/persons/matches`. Show the matches with a link to open each. To save anyway, send the same
-  body again with `confirmDuplicate: true` and a `duplicateReason` (required, up to 500
-  characters); it goes to the AuditLog (`Entity` = `Person`, `Action` = `SavedAsDuplicate`).
-  Changing other fields of a person who already has a duplicate is not blocked.
-- **How names are matched:** capitals, spaces, dots, hyphens, apostrophes and accents are ignored
-  (DELA CRUZ = DE LA CRUZ, CAÑETE = CANETE, MA. NILDA = MA NILDA). A JR, SR, II, III or IV typed
-  into the first or last name counts as the suffix. **Same:** same last, first and middle name and
-  suffix. **Similar** (shown, never blocks): only one has a middle name, the middle name is only an
-  initial, first and last name swapped, or only one has a suffix. Two different birthdates or
-  suffixes (JR vs SR) are never a match; a missing birthdate matches any. Almost no old records have
-  a birthdate, so in practice this is a name check.
-- Double spaces inside names are collapsed when saving.
+- Search: digits match the ID or contact number, words match the names (every word).
+- Names are saved in capitals: letters, spaces and `. ' -` only. Contact no. 7 to 15 digits.
+  Birthdate 1900 to today.
+- Old records only have sex, barangay and municipality as text. Show the text, send the IDs, filter by IDs.
+- Same person: create or rename returns 409 `{ message, matches }` when someone has the same name.
+  Save anyway with `confirmDuplicate: true` and a `duplicateReason` (logged).
+- Name matching ignores spacing, punctuation and accents, and reads JR/SR/II/III/IV from the name.
+  Different birthdates or JR vs SR never match.
 
 ### Things to know about the dashboard
 
-- Claims from the old system came over with status 0 but aren't deleted, so they're counted. Only
-  claims made in this app can be deleted (status 0 with a `createdBy`).
-- **Waiting** means made in this app, not deleted and not released. Old claims have no release
-  status, so they never show as waiting. It isn't limited to the chosen month.
-- **Beneficiaries** are patients, each counted once. `firstTime` had no counted claim before the
-  period, `returning` did. Sectors can overlap, so they don't add up to the total. Age is at the
-  end of the month.
-- **Budget** is read live from the finance system (sysPFM) through `getAnnualBalance`. Only fund
-  sources linked to a finance appropriation for that year show up. If the finance server can't be
-  reached it returns 503 with a `message`; show that in the card and keep the rest of the page.
-  Claims don't record their fund source yet, so the budget can't be matched to claims.
+- Old-system claims came over with status 0 but count, until they are cancelled here.
+- Waiting = made here, not released, any month.
+- Beneficiaries are counted once. Sectors overlap, so they don't add up.
+- Budget is live from sysPFM (`getAnnualBalance`). 503 when finance is down: show it in the card.
+
+### Things to know about claims
+
+- New claims need a date, lane and patient. The queue number is per day and lane.
+- Frontliners can't set `amount`, `creditorId`, `fundSourceId`, `modeId`, `socialWorkerAssessment` or
+  `isReleased` (403).
+- Releasing needs an amount. A released claim is locked (409) until an admin saves `{ transactionId,
+  isReleased: false }` on its own.
+- The fund source must be for the claim's year. Only admins move a claim to another day.
+- Send dates as picked (`2026-11-17T09:00`). UTC (`...Z`) is turned into PH time.
+- Cancelled claims are hidden from lists and totals, and can't be edited.
+- Every change goes to AuditLog (`Transaction`).
+
+### Things to know about reports
+
+- `GET /api/reports/transactions` and `/perennial-clients` (logged in) count the same claims as the dashboard:
+  old-system claims yes, cancelled no. Query: `assistanceCode`, `dateFrom`, `dateTo`.
+- The claims report stops at 5,000 claims: 400 with a message to narrow the dates.
+- `GET /api/balance/annual?year=` is admins only, 503 when finance is down.
+
+### Things to know about fund sources
+
+- An appropriation (per year) or a trust fund. The dashboard budget reads them through `getAnnualBalance`.
+- Accounts come live from sysPFM, OPSWDO only (office 17). Finance down: saving returns 503, the list
+  still loads with `financeAvailable: false`.
+- Only accounts that paid aid can be picked: aid wording in finance (`aidObligations`) or paid to a
+  Claims creditor (`creditorPayments`). Saving any other account returns 400. Show
+  `finance.paysAid: false` as a problem.
+- One account per year. No inactive: remove instead, only when no claims use it. Once claims use it,
+  year and program are locked.
+- `released` = `original + supplemental + adjustments`, `obligated` is approved only, `pending` is
+  separate. Trust funds skip deleted receipts. Can differ from the dashboard budget.
+- Changes go to AuditLog (`FundSource`).
 
 ### Things to know about person review
 
-- Nothing on persons or claims is changed or merged yet. The only thing saved is the decision
-  (`SamePerson`, `NotSamePerson` or `Reopened`) in AuditLog (`Entity` = `DuplicateGroup`), with who,
-  when and the remark. A decision can be changed straight from same to different and back.
-- `review.keepPersonId` on a "same" group is the record the others will be merged into.
-- **Possible duplicates** are active persons matched as **same** by the rule under persons above
-  (spelling aside; a missing middle name on both counts as the same, and two different birthdates
-  split a group). Each person shows
-  their claims as patient, claims as representative, last claim date and family links, so staff can
-  tell which record to keep.
-- A marked group leaves the to-review list until someone new with the same name is added, then it shows again with everyone. `personIds` must be the whole current group.
-- Claims from the old system count even though their status is 0; claims deleted in this app don't.
+- Only the decision is saved (AuditLog, `DuplicateGroup`). Nothing is merged yet.
+- `review.keepPersonId` is the record the others will be merged into.
+- `personIds` must be the whole current group. A group comes back if someone new joins it.
 
 ## Rules
 

@@ -9,19 +9,13 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Claims.API.Controllers;
 
-// Read-only claim figures for the Creditors pages. Adding, renaming and removing creditors stays in
-// CreditorController.
-//
-// A claim counts unless it was deleted in this system (Status false with a CreatedBy). Claims imported from
-// the old system have no CreatedBy, and all of 2022 plus the undated ones came over with Status false, so
-// for them Status does not mean deleted (checked against sysCLAIMS on 2026-11-13).
+// old-system claims (no CreatedBy) came over with Status false, so it doesn't mean deleted for them
 [Route("api/creditor")]
 [ApiController]
 public class CreditorSummaryController(ApplicationDbContext context) : ControllerBase
 {
   private const int MaxPageSize = 100;
 
-  // Totals for every creditor that has claims; creditors without claims are left out.
   [HttpGet("summary")]
   public async Task<ActionResult<List<CreditorTotalsDto>>> Totals()
   {
@@ -31,9 +25,9 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
       .Select(g => new
       {
         CreditorId = g.Key,
-        Claims = g.Count(t => t.Status || t.CreatedBy == null),
-        Amount = g.Where(t => t.Status || t.CreatedBy == null).Sum(t => t.Amount),
-        LastClaim = g.Where(t => t.Status || t.CreatedBy == null).Max(t => t.Date),
+        Claims = g.Count(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)),
+        Amount = g.Where(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)).Sum(t => t.Amount),
+        LastClaim = g.Where(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)).Max(t => t.Date),
         AllClaims = g.Count(),
       })
       .ToListAsync();
@@ -56,7 +50,7 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
     }
 
     var claims = context.Transactions.AsNoTracking().Where(t => t.CreditorId == id);
-    var active = claims.Where(t => t.Status || t.CreatedBy == null);
+    var active = claims.Where(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null));
 
     var byYear = await active
       .Where(t => t.Date != null)
@@ -80,7 +74,6 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
         .ToList());
   }
 
-  // Programs (assistance codes) on this creditor's active claims, for the claims filter.
   [HttpGet("{id:int}/programs")]
   public async Task<ActionResult<List<CreditorProgramDto>>> Programs(int id)
   {
@@ -90,7 +83,7 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
     }
 
     var counts = await context.Transactions.AsNoTracking()
-      .Where(t => t.CreditorId == id && (t.Status || t.CreatedBy == null) && t.AssistanceCode != null)
+      .Where(t => t.CreditorId == id && (t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)) && t.AssistanceCode != null)
       .GroupBy(t => t.AssistanceCode!)
       .Select(g => new { Code = g.Key, Claims = g.Count() })
       .ToListAsync();
@@ -103,8 +96,6 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
       .ToList();
   }
 
-  // Active claims paid to the creditor. from/to are inclusive dates; search matches the ref no or
-  // every word of the patient's name; sort is "date" (default) or "amount", dir "desc" (default) or "asc".
   [HttpGet("{id:int}/claims")]
   public async Task<ActionResult<CreditorClaimsPageDto>> Claims(
     int id,
@@ -145,7 +136,6 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
         .ToList());
   }
 
-  // same filters as /claims, all rows, as csv
   [HttpGet("{id:int}/claims/export")]
   public async Task<IActionResult> Export(int id, [FromQuery] ClaimFilter filter)
   {
@@ -181,7 +171,6 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
       "text/csv", fileName);
   }
 
-  // claims per month for one year
   [HttpGet("{id:int}/months")]
   public async Task<ActionResult<List<CreditorMonthDto>>> Months(int id, [FromQuery] int year)
   {
@@ -193,7 +182,7 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
     var start = new DateTime(year, 1, 1);
     var end = start.AddYears(1);
     var months = await context.Transactions.AsNoTracking()
-      .Where(t => t.CreditorId == id && (t.Status || t.CreatedBy == null) && t.Date >= start && t.Date < end)
+      .Where(t => t.CreditorId == id && (t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)) && t.Date >= start && t.Date < end)
       .GroupBy(t => t.Date!.Value.Month)
       .Select(g => new { Month = g.Key, Claims = g.Count(), Amount = g.Sum(t => t.Amount) })
       .ToListAsync();
@@ -230,7 +219,7 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
     }
 
     var query = context.Transactions.AsNoTracking()
-      .Where(t => t.CreditorId == id && (t.Status || t.CreatedBy == null));
+      .Where(t => t.CreditorId == id && (t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)));
     if (f.From is not null)
     {
       var from = f.From.Value.Date;
@@ -248,9 +237,8 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
     }
     if (!string.IsNullOrWhiteSpace(f.Search))
     {
-      // Names and ref nos are stored in capitals; matching in capitals works under any collation.
+      // stored in capitals, so this works under any collation
       var whole = f.Search.Trim().ToUpperInvariant();
-      // A ref no match satisfies every word; otherwise each word must be in the patient's name.
       foreach (var word in whole.Split(' ', StringSplitOptions.RemoveEmptyEntries))
       {
         query = query.Where(t =>
@@ -303,7 +291,6 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
     return "\"" + value.Replace("\"", "\"\"") + "\"";
   }
 
-  // One claim of this creditor, with names instead of IDs.
   [HttpGet("{id:int}/claims/{transactionId:int}")]
   public async Task<ActionResult<CreditorClaimDetailDto>> Claim(int id, int transactionId)
   {
@@ -371,7 +358,7 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
     }
     else if (int.TryParse(t.SocialWorkerId?.Trim(), out var officerId))
     {
-      // Officers also stores passwords: read the name and position only.
+      // Officers has passwords: name and position only
       var officer = await context.Officers.AsNoTracking()
         .Where(o => o.Idnumber == officerId)
         .Select(o => new { o.Name, o.Position })
@@ -398,9 +385,9 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
       t.AssistanceCode,
       ProgramName(programs, t.AssistanceCode),
       t.Natures.OfType<string>().ToList(),
-      // The old system never recorded releases (always false), so for its claims it is unknown.
-      t.CreatedBy is null ? null : t.IsReleased,
-      t.Status || t.CreatedBy is null,
+      // old system never recorded releases
+      t.CreatedBy is null && t.LastUpdatedBy is null ? null : t.IsReleased,
+      t.Status || (t.CreatedBy is null && t.LastUpdatedBy is null),
       t.Patient is null || t.PatientPersonId is null
         ? null
         : new ClaimPersonDto(
@@ -424,7 +411,7 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
       t.DateLastUpdated);
   }
 
-  // The Assistance table has no key to join on, only the code; it is a handful of rows.
+  // Assistance has no key to join on
   private async Task<Dictionary<string, string?>> ProgramNamesAsync() =>
     (await context.Assistances.AsNoTracking()
       .Where(a => a.AssistanceCode != null)

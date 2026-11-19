@@ -24,7 +24,6 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
     return person is null ? NotFound(new { message = "Person not found." }) : person;
   }
 
-  // persons who may be the one being typed in; "same" ones block saving until confirmed
   [HttpGet("matches")]
   public async Task<ActionResult<List<PersonMatchDto>>> Matches([FromQuery] PersonMatchQueryDto query) =>
     await persons.FindMatchesAsync(query);
@@ -87,7 +86,12 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
     return result.Outcome == PersonOutcome.Ok ? NoContent() : Map(result);
   }
 
-  // family change log, newest first
+  [HttpGet("{id:int}/history")]
+  public async Task<ActionResult<List<PersonChangeDto>>> History(int id) =>
+    await persons.HistoryAsync(id) is { } history
+      ? history
+      : NotFound(new { message = "Person not found." });
+
   [HttpGet("{id:int}/family/history")]
   public async Task<ActionResult<List<FamilyChangeDto>>> FamilyHistory(int id) =>
     await persons.FamilyHistoryAsync(id) is { } history
@@ -98,6 +102,7 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
   {
     PersonOutcome.NotFound => NotFound(new { message = result.Message }),
     PersonOutcome.Duplicate => Conflict(new { message = result.Message, matches = result.Matches }),
+    PersonOutcome.Stale => Conflict(new { message = result.Message, stale = true }),
     _ => BadRequest(new { message = result.Message }),
   };
 

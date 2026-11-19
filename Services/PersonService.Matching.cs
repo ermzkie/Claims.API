@@ -11,11 +11,9 @@ public partial class PersonService
   private const string PersonEntity = "Person";
   private const string SavedAsDuplicate = "SavedAsDuplicate";
 
-  // the check and the save run one at a time, so two clerks can't add the same person at once.
-  // fine while the API runs on one server
+  // one at a time so two clerks can't add the same person at once (one server)
   private static readonly SemaphoreSlim SaveLock = new(1, 1);
 
-  // active persons who may be the one being typed in: "same" first, then the busiest
   public async Task<List<PersonMatchDto>> FindMatchesAsync(PersonMatchQueryDto query)
   {
     var codes = await db.NameSuffixes.AsNoTracking()
@@ -28,7 +26,6 @@ public partial class PersonService
       return [];
     }
 
-    // only names starting with the same letters can match, so the database only sends those
     var lastStarts = Starts(target.Last[0]);
     var firstStarts = Starts(target.First[0]);
     var except = query.ExceptPersonId ?? 0;
@@ -72,8 +69,7 @@ public partial class PersonService
       })
       .ToListAsync();
 
-    // same claim rule as the reports: old-system claims count, deleted ones made here don't
-    var claims = db.Transactions.AsNoTracking().Where(t => t.Status || t.CreatedBy == null);
+    var claims = db.Transactions.AsNoTracking().Where(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null));
     var asPatient = await claims
       .Where(t => t.PatientPersonId != null && ids.Contains(t.PatientPersonId!.Value))
       .GroupBy(t => t.PatientPersonId!.Value)
@@ -105,8 +101,6 @@ public partial class PersonService
       .ToList();
   }
 
-  // stops the save when a "same" match exists and wasn't confirmed with a reason.
-  // Confirmed holds the matches the user said are someone else, for the audit log
   private async Task<(PersonResult? Stop, List<int> Confirmed)> CheckDuplicateAsync(Person person, SavePersonDto dto)
   {
     var matches = await FindMatchesAsync(new PersonMatchQueryDto

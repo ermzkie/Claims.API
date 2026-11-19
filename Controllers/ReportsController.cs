@@ -1,6 +1,8 @@
 using Claims.API.Data;
 using Claims.API.DTOs.Reports;
 using Microsoft.AspNetCore.Authorization;
+
+using Claims.API.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -12,6 +14,9 @@ namespace Claims.API.Controllers;
 public class ReportsController(ApplicationDbContext context)
     : ControllerBase
 {
+    // a bigger report needs narrower dates, one response can't carry all the claims
+    public const int MaxReportRows = 5000;
+
     // =====================================================
     // TRANSACTION REPORT
     // =====================================================
@@ -31,9 +36,10 @@ public class ReportsController(ApplicationDbContext context)
                 "Date From cannot be later than Date To.");
         }
 
+        // old-system claims have Status false but still count
         var query = context.Transactions
             .AsNoTracking()
-            .Where(x => x.Status);
+            .Where(ClaimRules.Counted);
 
         // Assistance Type filter
         if (!string.IsNullOrWhiteSpace(parameters.AssistanceCode))
@@ -59,6 +65,15 @@ public class ReportsController(ApplicationDbContext context)
 
             query = query.Where(x =>
                 x.Date < exclusiveEndDate);
+        }
+
+        var count = await query.CountAsync();
+        if (count > MaxReportRows)
+        {
+            return BadRequest(new
+            {
+                message = $"This report has {count:N0} claims, more than {MaxReportRows:N0}. Narrow the dates or pick a program.",
+            });
         }
 
         var records = await query
@@ -109,8 +124,7 @@ public class ReportsController(ApplicationDbContext context)
                 x.Representative,
                 x.Amount,
                 x.CreditorId,
-                x.IsReleased,
-                x.Status
+                x.IsReleased
             })
             .ToListAsync();
 
@@ -145,7 +159,8 @@ public class ReportsController(ApplicationDbContext context)
                 Amount = x.Amount,
                 CreditorId = x.CreditorId,
                 IsReleased = x.IsReleased,
-                Status = x.Status
+                // only counted claims are listed
+                Status = true
             }).ToList();
 
         return Ok(result);
@@ -174,8 +189,8 @@ public class ReportsController(ApplicationDbContext context)
         // Base query
         var query = context.Transactions
             .AsNoTracking()
+            .Where(ClaimRules.Counted)
             .Where(x =>
-                x.Status &&
                 x.PatientPerson != null &&
                 x.PatientPersonId.HasValue);
 

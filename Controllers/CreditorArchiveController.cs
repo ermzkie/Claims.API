@@ -7,7 +7,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Claims.API.Controllers;
 
-// removed creditors (status false): list them and bring one back
 [Route("api/creditor")]
 [ApiController]
 public class CreditorArchiveController(ApplicationDbContext context, ICurrentUser currentUser, TimeProvider time)

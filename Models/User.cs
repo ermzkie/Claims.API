@@ -69,8 +69,14 @@ public partial class User
     [InverseProperty("CreatedByNavigation")]
     public virtual ICollection<Person> People { get; set; } = new List<Person>();
 
+    [InverseProperty("ApprovedByNavigation")]
+    public virtual ICollection<Transaction> TransactionApprovedByNavigations { get; set; } = new List<Transaction>();
+
+    [InverseProperty("ReleasedByNavigation")]
+    public virtual ICollection<Transaction> TransactionReleasedByNavigations { get; set; } = new List<Transaction>();
+
     [InverseProperty("SocialWorkerUser")]
-    public virtual ICollection<Transaction> Transactions { get; set; } = new List<Transaction>();
+    public virtual ICollection<Transaction> TransactionSocialWorkerUsers { get; set; } = new List<Transaction>();
 
     [InverseProperty("User")]
     public virtual ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();

@@ -85,10 +85,33 @@ public class LookupTests
     }
   }
 
+  [Fact]
+  public async Task LaneTypes_ReturnIdCodeName_InIdOrder()
+  {
+    var (app, client) = await StartAsync();
+    await using (app)
+    {
+      await using (var db = app.CreateDbContext())
+      {
+        db.LaneTypes.AddRange(
+          new LaneType { LaneTypeId = 2, LaneTypeCode = "FAST", LaneTypeDesc = "Fast lane" },
+          new LaneType { LaneTypeId = 1, LaneTypeCode = "STD", LaneTypeDesc = "Standard lane" });
+        await db.SaveChangesAsync();
+      }
+
+      var items = await client.GetFromJsonAsync<List<Item>>("/api/lookups/lane-types");
+
+      Assert.Equal(
+        [new Item(1, "STD", "Standard lane"), new Item(2, "FAST", "Fast lane")],
+        items);
+    }
+  }
+
   [Theory]
   [InlineData("/api/lookups/civil-statuses")]
   [InlineData("/api/lookups/name-suffixes")]
   [InlineData("/api/lookups/relationship-statuses")]
+  [InlineData("/api/lookups/lane-types")]
   public async Task EmptyTables_ReturnEmptyList(string url)
   {
     var (app, client) = await StartAsync();

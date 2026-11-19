@@ -18,43 +18,67 @@ public class TransactionTests
   {
     await using var app = new ClaimsApiFactory();
     await SeedRolesAsync(app);
-    var userId = await CreateUserAsync(app, "worker", Password, "Frontliner");
-    using var client = await LoginAsAsync(app, "worker", Password);
+    var frontlinerId = await CreateUserAsync(app, "front", Password, "Frontliner");
+    var workerId = await CreateUserAsync(app, "worker", Password, "Social Worker");
+    await CreateUserAsync(app, "admin", Password, "Administrator");
+    using var front = await LoginAsAsync(app, "front", Password);
+    using var worker = await LoginAsAsync(app, "worker", Password);
+    using var admin = await LoginAsAsync(app, "admin", Password);
 
-    var create = await client.PostAsJsonAsync("/api/transactions", new
+    short laneTypeId;
+    int patientPersonId;
+    await using (var db = app.CreateDbContext())
     {
-      refNo = "REF-41",
-      amount = 125.50m,
+      var lane = new LaneType { LaneTypeCode = "R", LaneTypeDesc = "Regular" };
+      var patient = new Person { FirstName = "Test", LastName = "Patient", Status = true };
+      db.LaneTypes.Add(lane);
+      db.People.Add(patient);
+      await db.SaveChangesAsync();
+      laneTypeId = lane.LaneTypeId;
+      patientPersonId = patient.PersonId;
+    }
+
+    var create = await front.PostAsJsonAsync("/api/transactions/save", new
+    {
+      date = app.Clock.GetUtcNow().UtcDateTime.AddHours(8),
+      laneTypeId,
+      patientPersonId,
     });
 
     Assert.Equal(HttpStatusCode.Created, create.StatusCode);
     var created = await create.Content.ReadFromJsonAsync<TransactionResponseDto>();
     Assert.NotNull(created);
     Assert.True(created.TransactionId > 0);
-    Assert.Equal(userId, created.SocialWorkerUserId);
-    Assert.Equal(userId, created.CreatedBy);
+    Assert.Equal(frontlinerId, created.CreatedBy);
     Assert.True(created.Status);
     var transactionId = created.TransactionId;
 
-    var update = await client.PostAsJsonAsync("/api/transactions", new
+    var update = await worker.PostAsJsonAsync("/api/transactions/save", new
     {
       transactionId,
-      refNo = "REF-41-UPDATED",
       amount = 200m,
       isReleased = true,
     });
     Assert.Equal(HttpStatusCode.NoContent, update.StatusCode);
 
-    var updated = await client.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{transactionId}");
-    Assert.Equal("REF-41-UPDATED", updated!.RefNo);
-    Assert.Equal(200m, updated.Amount);
+    var updated = await worker.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{transactionId}");
+    Assert.Equal(200m, updated!.Amount);
     Assert.True(updated.IsReleased);
-    Assert.Equal(userId, updated.LastUpdatedBy);
+    Assert.Equal(workerId, updated.LastUpdatedBy);
 
-    var delete = await client.DeleteAsync($"/api/transactions/{transactionId}");
+    var whileReleased = await admin.DeleteAsync($"/api/transactions/{transactionId}?reason=Duplicate");
+    Assert.Equal(HttpStatusCode.Conflict, whileReleased.StatusCode);
+
+    var reopen = await admin.PostAsJsonAsync("/api/transactions/save", new { transactionId, isReleased = false });
+    Assert.Equal(HttpStatusCode.NoContent, reopen.StatusCode);
+
+    var noReason = await admin.DeleteAsync($"/api/transactions/{transactionId}");
+    Assert.Equal(HttpStatusCode.BadRequest, noReason.StatusCode);
+
+    var delete = await admin.DeleteAsync($"/api/transactions/{transactionId}?reason=Duplicate");
     Assert.Equal(HttpStatusCode.NoContent, delete.StatusCode);
 
-    var deleted = await client.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{transactionId}");
+    var deleted = await admin.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{transactionId}");
     Assert.False(deleted!.Status);
   }
 
@@ -69,6 +93,7 @@ public class TransactionTests
     short firstNatureId;
     short secondNatureId;
     short laneTypeId;
+    int patientPersonId;
     await using (var db = app.CreateDbContext())
     {
       var firstNature = new NatureOfService { NatureDesc = "Medical", Status = true };
@@ -76,7 +101,10 @@ public class TransactionTests
       var laneType = new LaneType { LaneTypeCode = "NATURE", LaneTypeDesc = "Nature lane" };
       db.NatureOfServices.AddRange(firstNature, secondNature);
       db.LaneTypes.Add(laneType);
+      var patient = new Person { FirstName = "Test", LastName = "Patient", Status = true };
+      db.People.Add(patient);
       await db.SaveChangesAsync();
+      patientPersonId = patient.PersonId;
       firstNatureId = firstNature.NatureId;
       secondNatureId = secondNature.NatureId;
       laneTypeId = laneType.LaneTypeId;
@@ -87,6 +115,7 @@ public class TransactionTests
       refNo = "REF-NATURE",
       date = app.Clock.GetUtcNow().UtcDateTime.AddHours(8).Date,
       laneTypeId,
+      patientPersonId,
       natureIds = new[] { firstNatureId, secondNatureId },
     });
     Assert.Equal(HttpStatusCode.Created, create.StatusCode);
@@ -128,7 +157,7 @@ public class TransactionTests
   {
     await using var app = new ClaimsApiFactory();
     await SeedRolesAsync(app);
-    var userId = await CreateUserAsync(app, "worker", Password, "Frontliner");
+    var userId = await CreateUserAsync(app, "worker", Password, "Social Worker");
     using var client = await LoginAsAsync(app, "worker", Password);
 
     short laneTypeId;
@@ -149,6 +178,7 @@ public class TransactionTests
       {
         FundSourceId = fundSourceId,
         SourceId = sourceId,
+        Year = (short)transactionDate.Year,
         Status = true,
       });
       db.Creditors.Add(new Creditor
@@ -225,6 +255,7 @@ public class TransactionTests
     var today = app.Clock.GetUtcNow().UtcDateTime.AddHours(8).Date;
     short firstLaneId;
     short secondLaneId;
+    int patientPersonId;
     await using (var db = app.CreateDbContext())
     {
       var firstLane = new LaneType { LaneTypeCode = "A", LaneTypeDesc = "Lane A" };
@@ -233,6 +264,10 @@ public class TransactionTests
       await db.SaveChangesAsync();
       firstLaneId = firstLane.LaneTypeId;
       secondLaneId = secondLane.LaneTypeId;
+      var patient = new Person { FirstName = "Test", LastName = "Patient", Status = true };
+      db.People.Add(patient);
+      await db.SaveChangesAsync();
+      patientPersonId = patient.PersonId;
 
       db.Transactions.AddRange(new Transaction
       {
@@ -255,6 +290,7 @@ public class TransactionTests
     var firstResponse = await client.PostAsJsonAsync("/api/transactions/save", new
     {
       refNo = "QUEUE-1",
+      patientPersonId,
       date = today.AddHours(11),
       laneTypeId = firstLaneId,
     });
@@ -262,6 +298,7 @@ public class TransactionTests
     var secondResponse = await client.PostAsJsonAsync("/api/transactions/save", new
     {
       refNo = "QUEUE-2",
+      patientPersonId,
       date = today.AddHours(12),
       laneTypeId = firstLaneId,
     });
@@ -269,6 +306,7 @@ public class TransactionTests
     var otherLaneResponse = await client.PostAsJsonAsync("/api/transactions/save", new
     {
       refNo = "QUEUE-OTHER-LANE",
+      patientPersonId,
       date = today.AddHours(13),
       laneTypeId = secondLaneId,
     });
@@ -303,6 +341,7 @@ public class TransactionTests
       new
       {
         refNo = "QUEUE-NEXT-DAY",
+      patientPersonId,
         date = today.AddDays(1).AddHours(1),
         laneTypeId = firstLaneId,
       });
@@ -383,7 +422,7 @@ public class TransactionTests
   {
     await using var app = new ClaimsApiFactory();
     await SeedRolesAsync(app);
-    var userId = await CreateUserAsync(app, "worker", Password, "Frontliner");
+    var userId = await CreateUserAsync(app, "worker", Password, "Social Worker");
     using var client = await LoginAsAsync(app, "worker", Password);
 
     int transactionId;
@@ -400,9 +439,8 @@ public class TransactionTests
       transactionId = transaction.TransactionId;
     }
 
-    var response = await client.PostAsJsonAsync(
-      "/api/transactions/checkout-social-worker",
-      new { transactionId });
+    var response = await client.PostAsync(
+      $"/api/transactions/{transactionId}/checkout-social-worker", content: null);
 
     Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     var result = await response.Content.ReadFromJsonAsync<TransactionResponseDto>();
@@ -415,9 +453,41 @@ public class TransactionTests
     Assert.Equal(userId, saved.SocialWorkerUserId);
     Assert.Equal(app.Clock.GetUtcNow().UtcDateTime.AddHours(8), saved.DateLastUpdated);
 
-    var missing = await client.PostAsJsonAsync(
-      "/api/transactions/checkout-social-worker",
-      new { transactionId = int.MaxValue });
+    var missing = await client.PostAsync(
+      $"/api/transactions/{int.MaxValue}/checkout-social-worker", content: null);
     Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+  }
+
+  [Fact]
+  public async Task GetAllCurrentTransactionsOfSocialWorker_ReturnsOnlyTransactionsAssignedToCurrentUser()
+  {
+    await using var app = new ClaimsApiFactory();
+    await SeedRolesAsync(app);
+    var currentWorkerId = await CreateUserAsync(app, "current-worker", Password, "Social Worker");
+    var otherWorkerId = await CreateUserAsync(app, "other-worker", Password, "Social Worker");
+    using var client = await LoginAsAsync(app, "current-worker", Password);
+
+    int currentTransactionId;
+    await using (var db = app.CreateDbContext())
+    {
+      var currentTransaction = new Transaction
+      {
+        Status = true,
+        SocialWorkerUserId = currentWorkerId,
+      };
+      db.Transactions.AddRange(
+        currentTransaction,
+        new Transaction { Status = true, SocialWorkerUserId = otherWorkerId },
+        new Transaction { Status = true });
+      await db.SaveChangesAsync();
+      currentTransactionId = currentTransaction.TransactionId;
+    }
+
+    var transactions = await client.GetFromJsonAsync<List<TransactionResponseDto>>(
+      "/api/transactions/current-social-worker");
+
+    var transaction = Assert.Single(transactions!);
+    Assert.Equal(currentTransactionId, transaction.TransactionId);
+    Assert.Equal(currentWorkerId, transaction.SocialWorkerUserId);
   }
 }

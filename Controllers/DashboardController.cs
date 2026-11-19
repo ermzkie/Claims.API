@@ -8,7 +8,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Claims.API.Controllers;
 
-// read-only figures for the home page, for one month (default: this month)
 [Route("api/dashboard")]
 [ApiController]
 public class DashboardController(ApplicationDbContext context, TimeProvider time, ILogger<DashboardController> logger)
@@ -127,7 +126,6 @@ public class DashboardController(ApplicationDbContext context, TimeProvider time
       oldestWaiting);
   }
 
-  // who the claims were for: period "month" (default) or "year" (January up to the month)
   [HttpGet("beneficiaries")]
   public async Task<ActionResult<DashboardBeneficiariesDto>> Beneficiaries(
     [FromQuery] int? year = null, [FromQuery] int? month = null, [FromQuery] string? period = null)
@@ -228,7 +226,6 @@ public class DashboardController(ApplicationDbContext context, TimeProvider time
       sectors);
   }
 
-  // released and obligated per fund source, read live from the finance system (sysPFM)
   [HttpGet("budget")]
   [Authorize(Policy = AuthPolicies.UserAdmin)]
   public async Task<ActionResult<IReadOnlyList<DashboardBudgetDto>>> Budget([FromQuery] int? year = null)
@@ -241,7 +238,7 @@ public class DashboardController(ApplicationDbContext context, TimeProvider time
 
     try
     {
-      // the procedure goes through a linked server; don't let a slow one hang the page
+      // linked server, don't let it hang the page
       context.Database.SetCommandTimeout(TimeSpan.FromSeconds(20));
       var rows = await context.AnnualBalanceResults
         .FromSql($"EXEC getAnnualBalance @year = {y}")
@@ -297,9 +294,9 @@ public class DashboardController(ApplicationDbContext context, TimeProvider time
 
   // old-system claims came over with status false; only claims made here can be deleted
   private IQueryable<Transaction> CountedClaims() =>
-    context.Transactions.AsNoTracking().Where(t => t.Status || t.CreatedBy == null);
+    context.Transactions.AsNoTracking().Where(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null));
 
-  // the Assistance table has one row per budget release; one name per code
+  // Assistance has a row per budget release
   private async Task<Dictionary<string, string?>> ProgramNamesAsync() =>
     (await context.Assistances.AsNoTracking()
       .Where(a => a.AssistanceCode != null)

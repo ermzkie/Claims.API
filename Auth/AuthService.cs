@@ -14,7 +14,6 @@ public enum LoginOutcome
   LockedOut,
 }
 
-// AttemptsLeft: wrong tries left before lockout (InvalidCredentials). RetryAfter: time until unlock (LockedOut).
 public record LoginResult(
   LoginOutcome Outcome, LoginResponseDto? Response, int AttemptsLeft = 0, TimeSpan RetryAfter = default);
 
@@ -55,13 +54,12 @@ public class AuthService
       return new LoginResult(LoginOutcome.InvalidRequest, null);
     }
 
-    // Case-insensitive lookup on the trimmed name
     var normalized = username.Trim().ToLowerInvariant();
     var user = await _db.Users.FirstOrDefaultAsync(u => u.Username.ToLower() == normalized);
 
     var now = _time.GetLocalNow().DateTime;
 
-    // Unknown user: same hashing time, same countdown and lockout as a real account
+    // unknown user looks the same as a real one (timing, lockout)
     if (user is null)
     {
       if (_unknownAttempts.LockoutEnd(normalized) is { } unknownLockoutEnd && unknownLockoutEnd > now)
@@ -72,7 +70,6 @@ public class AuthService
       return Failed(_unknownAttempts.RecordFailure(normalized, now), now);
     }
 
-    // Locked out: no verification, no counter change
     if (user.LockoutEnd is { } lockoutEnd && lockoutEnd > now)
     {
       return Locked(lockoutEnd, now);
@@ -80,7 +77,7 @@ public class AuthService
 
     var verify = PasswordHashing.Hasher.VerifyHashedPassword(user, user.Password, password);
 
-    // Deactivated counts as a failure even with the right password, so it looks like a wrong password
+    // don't reveal that the account is deactivated
     if (verify == PasswordVerificationResult.Failed || !user.Status)
     {
       return Failed(await RecordFailedAttemptAsync(user.UserId, now), now);
@@ -147,8 +144,7 @@ public class AuthService
     return new ChangePasswordResult(ChangePasswordOutcome.Success, null);
   }
 
-  // Set-based so concurrent wrong guesses cannot read the same counter value. The tracked entity is
-  // not modified on the failure path, so a later SaveChanges cannot overwrite these columns.
+  // set-based so parallel wrong guesses can't skip the counter
   private async Task<FailedAttempt> RecordFailedAttemptAsync(int userId, DateTime now)
   {
     await _db.Users.Where(u => u.UserId == userId)

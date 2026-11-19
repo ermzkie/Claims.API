@@ -6,7 +6,6 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Claims.API.Controllers;
 
-// Admin maintenance of the reference data (small lookup lists). The dropdowns read it through /api/lookups.
 [Route("api/reference-data")]
 [ApiController]
 [Authorize(Policy = AuthPolicies.UserAdmin)]

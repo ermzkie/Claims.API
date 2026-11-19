@@ -15,8 +15,7 @@ public enum ListOutcome
 
 public record ListResult(ListOutcome Outcome, string? Message = null, ListItemDto? Item = null);
 
-// The reference data admins maintain from File Maintenance > Reference Data. None of these tables has a status
-// column, so a value can't be hidden: it can be renamed, or deleted while nothing uses it.
+// no status column on these tables, so values are renamed or deleted when unused
 public class ReferenceDataService(ApplicationDbContext db)
 {
   private const int MaxText = 50;
@@ -32,8 +31,6 @@ public class ReferenceDataService(ApplicationDbContext db)
     Task DeleteAsync(ApplicationDbContext db, int id);
   }
 
-  // Each table is a handful of rows, so rows are loaded and matched in memory.
-  // fixed group list, relationships only
   private sealed record Groups<T>(IReadOnlyList<string> Choices, Func<T, string?> Get, Action<T, string?> Set);
 
   private sealed class Lookup<T>(

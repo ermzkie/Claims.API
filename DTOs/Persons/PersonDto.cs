@@ -1,6 +1,6 @@
 namespace Claims.API.DTOs.Persons;
 
-// Sex, Barangay and Municipality are the text columns: old records only have the text, not the IDs.
+// text columns: old records only have the text
 public class PersonDto
 {
   public int PersonId { get; set; }
@@ -29,8 +29,9 @@ public class PersonDto
   public string? SkillOccupation { get; set; }
   public decimal? EstimatedMonthlyIncome { get; set; }
   public DateTime DateCreated { get; set; }
+  // send back on save so we can tell if someone changed it meanwhile
+  public string Version { get; set; } = "";
   public IReadOnlyList<FamilyMemberDto> Family { get; set; } = [];
-  // people who list this person as family; PersonId and names are theirs
   public IReadOnlyList<FamilyMemberDto> FamilyOf { get; set; } = [];
 }
 
@@ -50,7 +51,6 @@ public record FamilyMemberDto(
   string? ContactNo = null,
   string? SkillOccupation = null);
 
-// Search filters; all are optional and combine with each other and with the search text.
 public class PersonSearchDto
 {
   public string? Search { get; set; }
@@ -58,7 +58,7 @@ public class PersonSearchDto
   public int? BarangayId { get; set; }
   public short? SexId { get; set; }
 
-  // senior, pwd, 4ps, solo-parent; a person must have all of the ones given.
+  // senior, pwd, 4ps, solo-parent
   public List<string>? Sector { get; set; }
 
   public int Page { get; set; } = 1;

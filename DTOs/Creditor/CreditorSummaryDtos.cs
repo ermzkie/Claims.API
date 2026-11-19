@@ -1,7 +1,5 @@
 namespace Claims.API.DTOs.Creditor;
 
-// Claims, Amount and dates cover the claims that count (see CreditorSummaryController). AllClaims also
-// which still show the creditor's name (used to warn before a rename or removal).
 public record CreditorTotalsDto(
   int CreditorId,
   int Claims,
@@ -45,7 +43,6 @@ public record CreditorProgramDto(string Code, string? Type, int Claims);
 
 public record ClaimPersonDto(int PersonId, string? Name, string? Sex, string? Address);
 
-// Social worker: a User on new claims; on old claims the legacy Officers name (read-only).
 public record CreditorClaimDetailDto(
   int TransactionId,
   string? RefNo,

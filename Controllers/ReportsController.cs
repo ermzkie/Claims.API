@@ -1,3 +1,4 @@
+using Claims.API.Auth;
 
 using Claims.API.Data;
 using Claims.API.DTOs.Reports;
@@ -8,7 +9,7 @@ using Microsoft.AspNetCore.Authorization;
 
 namespace Claims.API.Controllers;
 
-[Authorize]
+[Authorize(Policy = AuthPolicies.ClaimsViewer)]
 [Route("api/reports")]
 [ApiController]
 public class ReportsController(ApplicationDbContext context)

@@ -1,0 +1,114 @@
+using System.Net;
+using System.Net.Http.Json;
+using Claims.API.DTOs.Transactions;
+using Claims.API.Models;
+using Claims.API.Tests.Infrastructure;
+using static Claims.API.Tests.Infrastructure.TestData;
+
+namespace Claims.API.Tests;
+
+// who may see what, per the role table
+public class AccessTests
+{
+  private const string Password = "Str0ng-Passw0rd!x";
+
+  private sealed record Office(
+    ClaimsApiFactory App, HttpClient Front, HttpClient Worker, HttpClient Admin, HttpClient Both,
+    int PersonId, int ClaimId, int CreditorId) : IAsyncDisposable
+  {
+    public async ValueTask DisposeAsync()
+    {
+      Front.Dispose();
+      Worker.Dispose();
+      Admin.Dispose();
+      Both.Dispose();
+      await App.DisposeAsync();
+    }
+  }
+
+  private static async Task<Office> SetupAsync()
+  {
+    var app = new ClaimsApiFactory();
+    await SeedRolesAsync(app);
+    await CreateUserAsync(app, "front", Password, "Frontliner");
+    await CreateUserAsync(app, "worker", Password, "Social Worker");
+    await CreateUserAsync(app, "admin", Password, "Administrator");
+    await CreateUserAsync(app, "both", Password, "Frontliner", "Social Worker");
+    int personId, creditorId;
+    short laneId;
+    await using (var db = app.CreateDbContext())
+    {
+      var lane = new LaneType { LaneTypeCode = "R", LaneTypeDesc = "Regular Lane" };
+      var person = new Person { FirstName = "MARIA", LastName = "SANTOS", Status = true, EstimatedMonthlyIncome = 8000m };
+      var creditor = new Creditor { CreditorId = 501, CreditorName = "PROVINCIAL HOSPITAL", Status = true };
+      db.AddRange(lane, person, creditor);
+      await db.SaveChangesAsync();
+      personId = person.PersonId;
+      creditorId = creditor.CreditorId;
+      laneId = lane.LaneTypeId;
+    }
+    var front = await LoginAsAsync(app, "front", Password);
+    var created = await front.PostAsJsonAsync("/api/transactions/save",
+      new { date = "2026-11-10T09:00", laneTypeId = laneId, patientPersonId = personId });
+    Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+    var claimId = (await created.Content.ReadFromJsonAsync<TransactionResponseDto>())!.TransactionId;
+    return new Office(app, front, await LoginAsAsync(app, "worker", Password), await LoginAsAsync(app, "admin", Password),
+      await LoginAsAsync(app, "both", Password), personId, claimId, creditorId);
+  }
+
+  private static string[] ClaimAndMoneyViews(Office o) =>
+  [
+    "/api/transactions",
+    $"/api/transactions/{o.ClaimId}",
+    $"/api/transactions/{o.ClaimId}/history",
+    "/api/dashboard",
+    "/api/creditor/summary",
+    "/api/creditor",
+    "/api/reports/transactions",
+    $"/api/persons/{o.PersonId}/transactions",
+  ];
+
+  [Fact]
+  public async Task Frontliner_CannotReadClaimsOrMoney()
+  {
+    await using var o = await SetupAsync();
+    foreach (var path in ClaimAndMoneyViews(o))
+      Assert.True((await o.Front.GetAsync(path)).StatusCode == HttpStatusCode.Forbidden, $"{path} should be 403 for a frontliner");
+  }
+
+  [Fact]
+  public async Task SocialWorker_CanReadClaimsAndMoney()
+  {
+    await using var o = await SetupAsync();
+    foreach (var path in ClaimAndMoneyViews(o))
+      Assert.True((await o.Worker.GetAsync(path)).StatusCode == HttpStatusCode.OK, $"{path} should be 200 for a social worker");
+  }
+
+  [Fact]
+  public async Task Export_IsAdminOnly()
+  {
+    await using var o = await SetupAsync();
+    var path = $"/api/creditor/{o.CreditorId}/claims/export";
+    Assert.Equal(HttpStatusCode.Forbidden, (await o.Worker.GetAsync(path)).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await o.Admin.GetAsync(path)).StatusCode);
+  }
+
+  [Fact]
+  public async Task Frontliner_CanStillFileANewClaim()
+  {
+    await using var o = await SetupAsync();
+    // the setup filed one as the frontliner already
+    var edit = await o.Front.PostAsJsonAsync("/api/transactions/save", new { transactionId = o.ClaimId, remarks = "late" });
+    Assert.Equal(HttpStatusCode.Forbidden, edit.StatusCode);
+    Assert.Equal(HttpStatusCode.NoContent,
+      (await o.Worker.PostAsJsonAsync("/api/transactions/save", new { transactionId = o.ClaimId, remarks = "late" })).StatusCode);
+  }
+
+  [Fact]
+  public async Task Frontliner_CanStillUseQueueAndPersons()
+  {
+    await using var o = await SetupAsync();
+    foreach (var path in new[] { "/api/queue/today", "/api/persons?search=santos", $"/api/persons/{o.PersonId}", "/api/lookups/lane-types" })
+      Assert.True((await o.Front.GetAsync(path)).StatusCode == HttpStatusCode.OK, $"{path} should be 200 for a frontliner");
+  }
+}

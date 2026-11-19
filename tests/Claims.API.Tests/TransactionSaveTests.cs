@@ -155,7 +155,7 @@ public class TransactionSaveTests
     for (var i = 0; i < 3; i++)
       await CreateAsync(o);
 
-    var page = await o.Front.GetFromJsonAsync<PagedResult<TransactionResponseDto>>("/api/transactions?pageSize=2");
+    var page = await o.Worker.GetFromJsonAsync<PagedResult<TransactionResponseDto>>("/api/transactions?pageSize=2");
 
     Assert.Equal(3, page!.Total);
     Assert.Equal(1, page.Page);
@@ -163,7 +163,7 @@ public class TransactionSaveTests
     Assert.Equal(2, page.TotalPages);
     Assert.Equal(2, page.Items.Count);
 
-    var tooBig = await o.Front.GetAsync("/api/transactions?pageSize=500");
+    var tooBig = await o.Worker.GetAsync("/api/transactions?pageSize=500");
     Assert.Equal(HttpStatusCode.BadRequest, tooBig.StatusCode);
   }
 
@@ -186,7 +186,8 @@ public class TransactionSaveTests
     Assert.Equal(HttpStatusCode.Forbidden, (await Save(o.Front, new { transactionId = id, amount = 5000m })).StatusCode);
     Assert.Equal(HttpStatusCode.Forbidden, (await Save(o.Front, new { transactionId = id, creditorId = o.CreditorId })).StatusCode);
     Assert.Equal(HttpStatusCode.Forbidden, (await Save(o.Front, new { transactionId = id, isReleased = true })).StatusCode);
-    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Front, new { transactionId = id, remarks = "walk-in" })).StatusCode);
+    // a filed claim belongs to the social worker now
+    Assert.Equal(HttpStatusCode.Forbidden, (await Save(o.Front, new { transactionId = id, remarks = "walk-in" })).StatusCode);
     await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
     Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, amount = 5000m })).StatusCode);
   }
@@ -205,9 +206,9 @@ public class TransactionSaveTests
       fundSourceId = o.FundSourceId,
     })).StatusCode);
 
-    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Front, new { transactionId = id, remarks = "follow-up" })).StatusCode);
+    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, remarks = "follow-up" })).StatusCode);
 
-    var claim = await o.Front.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{id}");
+    var claim = await o.Worker.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{id}");
     Assert.Equal(12500.75m, claim!.Amount);
     Assert.Equal(o.CreditorId, claim.CreditorId);
     Assert.Equal(o.FundSourceId, claim.FundSourceId);
@@ -215,8 +216,8 @@ public class TransactionSaveTests
     Assert.Equal(o.PatientId, claim.PatientPersonId);
     Assert.Equal("follow-up", claim.Remarks);
 
-    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Front, new { transactionId = id, remarks = "" })).StatusCode);
-    claim = await o.Front.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{id}");
+    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, remarks = "" })).StatusCode);
+    claim = await o.Worker.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{id}");
     Assert.Null(claim!.Remarks);
   }
 
@@ -269,7 +270,7 @@ public class TransactionSaveTests
     await Bad(o.Worker, new { transactionId = id, creditorId = o.OldCreditorId });
     await Bad(o.Worker, new { transactionId = id, fundSourceId = o.LastYearFundSourceId });
     await Bad(o.Worker, new { transactionId = id, natureIds = new short[] { 999 } });
-    await Bad(o.Front, new { transactionId = id, date = "2026-11-11T09:00" });
+    await Bad(o.Worker, new { transactionId = id, date = "2026-11-11T09:00" });
 
     Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Admin, new { transactionId = id, date = "2026-11-11T09:00" })).StatusCode);
   }
@@ -314,16 +315,16 @@ public class TransactionSaveTests
     Assert.Equal(HttpStatusCode.NoContent,
       (await o.Admin.PostAsJsonAsync($"/api/transactions/{id}/cancel", new { reason = "duplicate" })).StatusCode);
 
-    var active = await o.Front.GetFromJsonAsync<PagedResult<TransactionResponseDto>>("/api/transactions");
+    var active = await o.Worker.GetFromJsonAsync<PagedResult<TransactionResponseDto>>("/api/transactions");
     Assert.Equal([keep], active!.Items.Select(t => t.TransactionId));
-    var cancelled = await o.Front.GetFromJsonAsync<PagedResult<TransactionResponseDto>>("/api/transactions?status=cancelled");
+    var cancelled = await o.Worker.GetFromJsonAsync<PagedResult<TransactionResponseDto>>("/api/transactions?status=cancelled");
     Assert.Equal([id], cancelled!.Items.Select(t => t.TransactionId));
 
     Assert.Equal(HttpStatusCode.Conflict, (await Save(o.Worker, new { transactionId = id, amount = 100m })).StatusCode);
     Assert.Equal(HttpStatusCode.Forbidden, (await o.Worker.PostAsync($"/api/transactions/{id}/restore", null)).StatusCode);
     Assert.Equal(HttpStatusCode.NoContent, (await o.Admin.PostAsync($"/api/transactions/{id}/restore", null)).StatusCode);
 
-    var all = await o.Front.GetFromJsonAsync<PagedResult<TransactionResponseDto>>("/api/transactions");
+    var all = await o.Worker.GetFromJsonAsync<PagedResult<TransactionResponseDto>>("/api/transactions");
     Assert.Equal(2, all!.Total);
 
     var history = await History(o, id);
@@ -390,9 +391,9 @@ public class TransactionSaveTests
     var inOther = await Save(o.Front, new { date = "2026-11-10T09:05", laneTypeId = otherLane, patientPersonId = o.PatientId, confirmSameDay = true });
     Assert.Equal((short)1, (await inOther.Content.ReadFromJsonAsync<TransactionResponseDto>())!.QueueNo);
 
-    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Front, new { transactionId = id, laneTypeId = otherLane })).StatusCode);
+    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, laneTypeId = otherLane })).StatusCode);
 
-    var moved = await o.Front.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{id}");
+    var moved = await o.Worker.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{id}");
     Assert.Equal((short)2, moved!.QueueNo);
   }
 
@@ -400,7 +401,7 @@ public class TransactionSaveTests
   public async Task GetAll_RejectsAPageThatWouldOverflow()
   {
     await using var o = await SetupAsync();
-    var response = await o.Front.GetAsync($"/api/transactions?page={int.MaxValue}&pageSize=100");
+    var response = await o.Worker.GetAsync($"/api/transactions?page={int.MaxValue}&pageSize=100");
     Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
   }
 
@@ -416,7 +417,7 @@ public class TransactionSaveTests
       await db.SaveChangesAsync();
     }
 
-    var response = await Save(o.Front, new { transactionId = id, socialWorkerAssessment = "needs follow-up" });
+    var response = await Save(o.Worker, new { transactionId = id, socialWorkerAssessment = "needs follow-up" });
 
     Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
     Assert.Equal(["Created"], (await History(o, id)).Select(h => h.Action));
@@ -478,7 +479,7 @@ public class TransactionSaveTests
     Assert.Equal(HttpStatusCode.Forbidden, money.StatusCode);
     Assert.Contains("Check out the claim first.", await money.Content.ReadAsStringAsync());
 
-    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Front, new { transactionId = id, remarks = "brought papers" })).StatusCode);
+    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker2, new { transactionId = id, remarks = "brought papers" })).StatusCode);
   }
 
   private static Task<HttpResponseMessage> File(Office o, string date = "2026-11-10T09:00", bool confirm = false) =>

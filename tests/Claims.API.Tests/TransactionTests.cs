@@ -95,7 +95,7 @@ public class TransactionTests
   {
     await using var app = new ClaimsApiFactory();
     await SeedRolesAsync(app);
-    await CreateUserAsync(app, "worker", Password, "Frontliner");
+    await CreateUserAsync(app, "worker", Password, "Social Worker");
     using var client = await LoginAsAsync(app, "worker", Password);
 
     short firstNatureId;
@@ -259,7 +259,7 @@ public class TransactionTests
   {
     await using var app = new ClaimsApiFactory();
     await SeedRolesAsync(app);
-    await CreateUserAsync(app, "worker", Password, "Frontliner");
+    await CreateUserAsync(app, "worker", Password, "Social Worker");
     using var client = await LoginAsAsync(app, "worker", Password);
 
     var today = app.Clock.GetUtcNow().UtcDateTime.AddHours(8).Date;
@@ -382,7 +382,7 @@ public class TransactionTests
   {
     await using var app = new ClaimsApiFactory();
     await SeedRolesAsync(app);
-    var userId = await CreateUserAsync(app, "worker", Password, "Frontliner");
+    var userId = await CreateUserAsync(app, "worker", Password, "Social Worker");
     using var client = await LoginAsAsync(app, "worker", Password);
 
     int transactionId;

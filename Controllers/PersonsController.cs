@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Claims.API.Auth;
 using Claims.API.DTOs.Common;
 using Claims.API.DTOs.Persons;
@@ -29,6 +30,7 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
     await persons.FindMatchesAsync(query);
 
   [HttpGet("{id:int}/transactions")]
+  [Authorize(Policy = AuthPolicies.ClaimsViewer)]
   public async Task<ActionResult<PagedResult<TransactionResponseDto>>> GetTransactionHistory(
     int id,
     [FromQuery] int page = 1,

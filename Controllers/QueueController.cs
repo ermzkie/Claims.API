@@ -22,6 +22,12 @@ public class QueueController(QueueService queue, ICurrentUser currentUser) : Con
   public async Task<ActionResult<QueueTodayDto>> Today(CancellationToken cancellationToken) =>
     await queue.TodayAsync(cancellationToken);
 
+  // codes and desks only, so the TV account can read it
+  [HttpGet("now-serving")]
+  [Authorize(Policy = AuthPolicies.QueueDisplay)]
+  public async Task<ActionResult<NowServingDto>> NowServing(CancellationToken cancellationToken) =>
+    await queue.NowServingAsync(cancellationToken);
+
   [HttpPost("next")]
   public async Task<ActionResult<TransactionResponseDto>> Next(
     [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] QueueCallRequest? request,

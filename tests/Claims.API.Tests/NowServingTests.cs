@@ -176,4 +176,112 @@ public class NowServingTests
     await o.Admin.PostAsJsonAsync($"/api/transactions/{other}/cancel", new { reason = "duplicate" });
     Assert.Equal(HttpStatusCode.Conflict, (await Recall(o.Admin, other)).StatusCode);
   }
+
+  private static async Task<NowServingDto> NowServingAsync(HttpClient client) =>
+    (await client.GetFromJsonAsync<NowServingDto>("/api/queue/now-serving"))!;
+
+  private static async Task<string> CodeOf(Office o, int id) =>
+    (await o.Admin.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{id}"))!.QueueNoCode!;
+
+  [Fact]
+  public async Task NowServing_OnlyCodesAndDesks()
+  {
+    await using var o = await SetupAsync();
+    await FileAsync(o);
+    await FileAsync(o);
+    await CallAsync(o.Worker, o.Desk1);
+
+    var body = await o.Tv.GetStringAsync("/api/queue/now-serving");
+    using var doc = System.Text.Json.JsonDocument.Parse(body);
+    Assert.Equal(["serverTime", "calls", "next"], doc.RootElement.EnumerateObject().Select(p => p.Name));
+    var call = Assert.Single(doc.RootElement.GetProperty("calls").EnumerateArray());
+    Assert.Equal(["code", "desk", "calledAt", "isRecall"], call.EnumerateObject().Select(p => p.Name));
+    Assert.DoesNotContain("SANTOS", body, StringComparison.OrdinalIgnoreCase);
+    Assert.DoesNotContain("MARIA", body, StringComparison.OrdinalIgnoreCase);
+  }
+
+  [Fact]
+  public async Task NowServing_NewestCallFirst_AndNext()
+  {
+    await using var o = await SetupAsync();
+    for (var i = 0; i < 5; i++)
+      await FileAsync(o);
+    var first = await CallAsync(o.Worker, o.Desk1);
+    o.App.Clock.Advance(TimeSpan.FromMinutes(1));
+    var second = await CallAsync(o.Worker2, o.Desk2);
+
+    var now = await NowServingAsync(o.Front);
+    Assert.Equal([await CodeOf(o, second), await CodeOf(o, first)], now.Calls.Select(c => c.Code));
+    Assert.Equal(["Desk 2", "Desk 1"], now.Calls.Select(c => c.Desk));
+    Assert.Equal(["S3", "S4", "S5"], now.Next);
+  }
+
+  [Fact]
+  public async Task NowServing_ShowsDeskOfLatestCall()
+  {
+    await using var o = await SetupAsync();
+    await FileAsync(o);
+    var id = await CallAsync(o.Worker, o.Desk1);
+    Assert.Equal(HttpStatusCode.NoContent, (await o.Worker.PostAsJsonAsync($"/api/queue/{id}/return", new { })).StatusCode);
+    o.App.Clock.Advance(TimeSpan.FromMinutes(1));
+    await CallAsync(o.Worker2, o.Desk2);
+
+    var call = Assert.Single((await NowServingAsync(o.Tv)).Calls);
+    Assert.Equal("Desk 2", call.Desk);
+  }
+
+  [Fact]
+  public async Task NowServing_TakeoverDoesNotMove()
+  {
+    await using var o = await SetupAsync();
+    await FileAsync(o);
+    await FileAsync(o);
+    var a = await CallAsync(o.Worker, o.Desk1);
+    o.App.Clock.Advance(TimeSpan.FromMinutes(1));
+    var b = await CallAsync(o.Worker2, o.Desk2);
+    var before = (await NowServingAsync(o.Tv)).Calls.Single(c => c.Code == "S1");
+    o.App.Clock.Advance(TimeSpan.FromMinutes(1));
+    Assert.Equal(HttpStatusCode.OK, (await o.Admin.PostAsJsonAsync($"/api/transactions/{a}/checkout-social-worker",
+      new { takeOver = true, reason = "Ana went home" })).StatusCode);
+
+    var calls = (await NowServingAsync(o.Tv)).Calls;
+    Assert.Equal([await CodeOf(o, b), await CodeOf(o, a)], calls.Select(c => c.Code));
+    Assert.Equal("Desk 1", calls[1].Desk);
+    Assert.Equal(before.CalledAt, calls[1].CalledAt);
+  }
+
+  [Fact]
+  public async Task NowServing_CallBackShowsThenDrops()
+  {
+    await using var o = await SetupAsync();
+    var id = await FileAsync(o, "2026-11-09T09:00");
+    Assert.Equal(HttpStatusCode.OK, (await o.Worker.PostAsJsonAsync($"/api/transactions/{id}/checkout-social-worker", new { deskId = o.Desk1 })).StatusCode);
+    await SendAsync(o.Worker, id);
+    Assert.Equal(HttpStatusCode.OK, (await o.Approver.PostAsync($"/api/transactions/{id}/approve", null)).StatusCode);
+    Assert.Empty((await NowServingAsync(o.Tv)).Calls);
+
+    Assert.Equal(HttpStatusCode.NoContent, (await Recall(o.Worker, id, o.Desk2)).StatusCode);
+    var call = Assert.Single((await NowServingAsync(o.Tv)).Calls);
+    Assert.True(call.IsRecall);
+    Assert.Equal("Desk 2", call.Desk);
+    Assert.Equal("S1", call.Code);
+
+    Assert.Equal(HttpStatusCode.OK, (await o.Worker.GetAsync($"/api/transactions/{id}/document")).StatusCode);
+    Assert.Empty((await NowServingAsync(o.Tv)).Calls);
+
+    o.App.Clock.Advance(TimeSpan.FromMinutes(1));
+    await Recall(o.Worker, id);
+    Assert.Single((await NowServingAsync(o.Tv)).Calls);
+    o.App.Clock.Advance(TimeSpan.FromMinutes(16));
+    Assert.Empty((await NowServingAsync(o.Tv)).Calls);
+  }
+
+  [Fact]
+  public async Task NowServing_DisplayAndStaffCanRead()
+  {
+    await using var o = await SetupAsync();
+    Assert.Equal(HttpStatusCode.OK, (await o.Tv.GetAsync("/api/queue/now-serving")).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await o.Front.GetAsync("/api/queue/now-serving")).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await o.Approver.GetAsync("/api/queue/now-serving")).StatusCode);
+  }
 }

@@ -206,6 +206,69 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
       ? d.GetInt32() : null;
   }
 
+  private const int TvRows = 8;
+  private static readonly TimeSpan CallBackShown = TimeSpan.FromMinutes(15);
+  // after these a call-back has done its job and leaves the TV
+  private static readonly string[] CallBackDone = [ApprovalService.Printed, ApprovalService.SentForApproval];
+
+  /// <summary>What the waiting-area TV shows: codes and desks only.</summary>
+  public async Task<NowServingDto> NowServingAsync(CancellationToken ct)
+  {
+    var now = Now();
+    var rows = await TodayRowsAsync(ct);
+    var serving = rows.Where(r => r.State == State.Serving).ToList();
+
+    // handover and fix-up call-backs: any day, recalled in the last 15 minutes
+    var since = now - CallBackShown;
+    var recalledIds = await db.AuditLogs.AsNoTracking()
+      .Where(a => a.Entity == Entity && a.Action == Recalled && a.DateCreated >= since)
+      .Select(a => a.EntityId).Distinct().ToListAsync(ct);
+    var callBacks = await db.Transactions.AsNoTracking()
+      .Where(ClaimRules.Counted)
+      .Where(t => recalledIds.Contains(t.TransactionId)
+        && (t.ApprovalStatus == ApprovalStatuses.Returned || t.ApprovalStatus == ApprovalStatuses.Approved))
+      .Include(t => t.LaneType)
+      .ToListAsync(ct);
+
+    var ids = serving.Select(r => r.Claim.TransactionId).Concat(callBacks.Select(c => c.TransactionId)).ToList();
+    var logs = (await db.AuditLogs.AsNoTracking()
+        .Where(a => a.Entity == Entity && ids.Contains(a.EntityId)
+          && (CallActions.Contains(a.Action) || CallBackDone.Contains(a.Action)))
+        .Select(a => new { a.EntityId, a.Action, a.NewValues, a.DateCreated, a.AuditLogId })
+        .ToListAsync(ct))
+      .ToLookup(a => a.EntityId);
+
+    var calls = new List<(NowServingCallDto Call, int? DeskId, int Order)>();
+    foreach (var r in serving)
+    {
+      var call = logs[r.Claim.TransactionId].Where(a => CallActions.Contains(a.Action)).MaxBy(a => a.AuditLogId);
+      calls.Add((new NowServingCallDto(r.Code, null, call?.DateCreated ?? r.Since ?? now, call?.Action == Recalled),
+        DeskOf(call?.NewValues), call?.AuditLogId ?? 0));
+    }
+    foreach (var c in callBacks)
+    {
+      var mine = logs[c.TransactionId].OrderBy(a => a.AuditLogId).ToList();
+      var recall = mine.LastOrDefault(a => a.Action == Recalled);
+      if (recall is null || recall.DateCreated < since || mine.Any(a => a.AuditLogId > recall.AuditLogId && CallBackDone.Contains(a.Action)))
+        continue;
+      var code = $"{c.LaneType?.LaneTypeCode?.Trim()}{c.QueueNo}";
+      calls.Add((new NowServingCallDto(code, null, recall.DateCreated, true), DeskOf(recall.NewValues), recall.AuditLogId));
+    }
+
+    var deskIds = calls.Select(c => c.DeskId).OfType<int>().Distinct().ToList();
+    var desks = await db.Desks.AsNoTracking().Where(d => deskIds.Contains(d.DeskId))
+      .ToDictionaryAsync(d => d.DeskId, d => d.DeskName, ct);
+
+    return new NowServingDto(
+      now,
+      calls
+        .OrderByDescending(c => c.Call.CalledAt).ThenByDescending(c => c.Order)
+        .Take(TvRows)
+        .Select(c => c.Call with { Desk = c.DeskId is { } d ? desks.GetValueOrDefault(d) : null })
+        .ToList(),
+      InServingOrder(rows.Where(r => r.State == State.Waiting)).Take(TvRows).Select(r => r.Code).ToList());
+  }
+
   /// <summary>Takes the claim off its worker: back to the queue, or out of it as not served.</summary>
   public async Task<QueueActionOutcome> LetGoAsync(
     int id, int userId, bool isAdmin, string action, string? reason, CancellationToken ct)

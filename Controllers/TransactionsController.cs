@@ -412,6 +412,39 @@ public class TransactionsController(
     return Ok(TransactionResponseMapper.ToResponse(transaction));
   }
 
+  [HttpPost("{id:int}/submit-for-approval")]
+  public async Task<ActionResult<TransactionResponseDto>> SubmitTransactionForApproval(
+    int id,
+    CancellationToken cancellationToken)
+  {
+    if (!CanHandleMoney)
+      return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only social workers and admins can submit claims for approval." });
+
+    var transaction = await LoadAsync(id, cancellationToken, tracking: true);
+    if (transaction is null)
+      return NotFound(new { message = "Transaction not found." });
+    if (ClaimRules.IsCancelled(transaction))
+      return Conflict(new { message = "This claim was cancelled." });
+    if (transaction.IsReleased == true)
+      return Conflict(new { message = "This claim is already released." });
+
+    if (transaction.ApprovalStatusId == 2)
+      return Ok(TransactionResponseMapper.ToResponse(transaction));
+
+    var previous = transaction.ApprovalStatusId;
+    var now = Now();
+    transaction.ApprovalStatusId = 2;
+    Touch(transaction, now);
+    Log(transaction, "Submitted for approval",
+      new Dictionary<string, object?> { ["approvalStatusId"] = previous },
+      new Dictionary<string, object?> { ["approvalStatusId"] = transaction.ApprovalStatusId },
+      null, now);
+    if (!await TrySaveAsync(cancellationToken))
+      return Changed();
+
+    return Ok(TransactionResponseMapper.ToResponse(transaction));
+  }
+
   [HttpPost("{id:int}/cancel")]
   public Task<IActionResult> Cancel(int id, ReasonRequest request, CancellationToken cancellationToken) =>
     CancelAsync(id, request.Reason, cancellationToken);
@@ -555,7 +588,7 @@ public class TransactionsController(
     ["amount"] = t.Amount,
     ["socialWorkerAssessment"] = Text(t.SocialWorkerAssessment, null),
     ["remarks"] = Text(t.Remarks, null),
-    ["isReleased"] = t.IsReleased ?? false,
+    ["isReleased"] = t.IsReleased,
     ["natureIds"] = string.Join(",", t.TransactionServices
       .Where(s => s.NatureId.HasValue).Select(s => s.NatureId!.Value).OrderBy(n => n)),
   };

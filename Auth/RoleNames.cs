@@ -6,6 +6,7 @@ public static class RoleNames
   public const string Administrator = "Administrator";
   public const string Frontliner = "Frontliner";
   public const string SocialWorker = "Social Worker";
+  public const string Approver = "Approver";
 
   public static readonly IReadOnlySet<string> Privileged =
     new HashSet<string>(StringComparer.Ordinal) { SuperAdministrator, Administrator };

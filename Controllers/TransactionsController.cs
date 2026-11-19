@@ -32,6 +32,7 @@ public class TransactionsController(
     currentUser.IsInRole(RoleNames.SuperAdministrator) || currentUser.IsInRole(RoleNames.Administrator);
 
   private bool CanHandleMoney => IsAdmin || currentUser.IsInRole(RoleNames.SocialWorker);
+  private bool CanApprove => IsAdmin || currentUser.IsInRole(RoleNames.Approver);
 
   private DateTime Now() => time.GetUtcNow().UtcDateTime.AddHours(8);
 
@@ -438,6 +439,53 @@ public class TransactionsController(
     Log(transaction, "Submitted for approval",
       new Dictionary<string, object?> { ["approvalStatusId"] = previous },
       new Dictionary<string, object?> { ["approvalStatusId"] = transaction.ApprovalStatusId },
+      null, now);
+    if (!await TrySaveAsync(cancellationToken))
+      return Changed();
+
+    return Ok(TransactionResponseMapper.ToResponse(transaction));
+  }
+
+  [HttpPost("{id:int}/approve")]
+  public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
+    int id,
+    CancellationToken cancellationToken)
+  {
+    if (!CanApprove)
+      return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only approvers and admins can approve claims." });
+
+    var transaction = await LoadAsync(id, cancellationToken, tracking: true);
+    if (transaction is null)
+      return NotFound(new { message = "Transaction not found." });
+    if (ClaimRules.IsCancelled(transaction))
+      return Conflict(new { message = "This claim was cancelled." });
+    if (transaction.IsReleased == true)
+      return Conflict(new { message = "This claim is already released." });
+
+    if (transaction.ApprovalStatusId == 3)
+      return Ok(TransactionResponseMapper.ToResponse(transaction));
+
+    var previousStatus = transaction.ApprovalStatusId;
+    var previousApprovedBy = transaction.ApprovedBy;
+    var previousDateApproved = transaction.DateApproved;
+    var now = Now();
+    transaction.ApprovalStatusId = 3;
+    transaction.ApprovedBy = currentUser.Id;
+    transaction.DateApproved = now;
+    Touch(transaction, now);
+    Log(transaction, "Approved the transaction",
+      new Dictionary<string, object?>
+      {
+        ["approvalStatusId"] = previousStatus,
+        ["approvedBy"] = previousApprovedBy,
+        ["dateApproved"] = previousDateApproved,
+      },
+      new Dictionary<string, object?>
+      {
+        ["approvalStatusId"] = transaction.ApprovalStatusId,
+        ["approvedBy"] = transaction.ApprovedBy,
+        ["dateApproved"] = transaction.DateApproved,
+      },
       null, now);
     if (!await TrySaveAsync(cancellationToken))
       return Changed();

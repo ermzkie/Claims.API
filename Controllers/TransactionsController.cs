@@ -493,6 +493,50 @@ public class TransactionsController(
     return Ok(TransactionResponseMapper.ToResponse(transaction));
   }
 
+  [HttpPost("{id:int}/release")]
+  public async Task<ActionResult<TransactionResponseDto>> ReleaseTransaction(
+    int id,
+    CancellationToken cancellationToken)
+  {
+    if (!CanHandleMoney)
+      return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only social workers and admins can release claims." });
+
+    var transaction = await LoadAsync(id, cancellationToken, tracking: true);
+    if (transaction is null)
+      return NotFound(new { message = "Transaction not found." });
+    if (ClaimRules.IsCancelled(transaction))
+      return Conflict(new { message = "This claim was cancelled." });
+    if (transaction.IsReleased == true)
+      return Conflict(new { message = "This claim is already released." });
+
+    var previousIsReleased = transaction.IsReleased;
+    var previousReleasedBy = transaction.ReleasedBy;
+    var previousDateReleased = transaction.DateReleased;
+    var now = Now();
+    transaction.IsReleased = true;
+    transaction.ReleasedBy = currentUser.Id;
+    transaction.DateReleased = now;
+    Touch(transaction, now);
+    Log(transaction, "Released",
+      new Dictionary<string, object?>
+      {
+        ["isReleased"] = previousIsReleased,
+        ["releasedBy"] = previousReleasedBy,
+        ["dateReleased"] = previousDateReleased,
+      },
+      new Dictionary<string, object?>
+      {
+        ["isReleased"] = transaction.IsReleased,
+        ["releasedBy"] = transaction.ReleasedBy,
+        ["dateReleased"] = transaction.DateReleased,
+      },
+      null, now);
+    if (!await TrySaveAsync(cancellationToken))
+      return Changed();
+
+    return Ok(TransactionResponseMapper.ToResponse(transaction));
+  }
+
   [HttpPost("{id:int}/cancel")]
   public Task<IActionResult> Cancel(int id, ReasonRequest request, CancellationToken cancellationToken) =>
     CancelAsync(id, request.Reason, cancellationToken);

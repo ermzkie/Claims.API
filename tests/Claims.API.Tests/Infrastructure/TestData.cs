@@ -16,6 +16,7 @@ public static class TestData
     (3, "Frontliner"),
     (4, "Social Worker"),
     (5, "Approver"),
+    (6, "Display"),
   ];
 
   public static async Task SeedRolesAsync(ClaimsApiFactory app)

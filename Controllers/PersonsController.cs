@@ -12,6 +12,16 @@ namespace Claims.API.Controllers;
 [ApiController]
 public class PersonsController(PersonService persons, ICurrentUser currentUser) : ControllerBase
 {
+  // frontliner and nothing more: basics only, no family links
+  private bool BasicsOnly =>
+    currentUser.IsInRole(RoleNames.Frontliner)
+    && !currentUser.IsInRole(RoleNames.SocialWorker)
+    && !currentUser.IsInRole(RoleNames.Administrator)
+    && !currentUser.IsInRole(RoleNames.SuperAdministrator);
+
+  private ObjectResult FamilyForbidden() =>
+    StatusCode(StatusCodes.Status403Forbidden, new { message = "Family is filled in by the social worker." });
+
   [HttpGet]
   public async Task<ActionResult<PagedResult<PersonListItemDto>>> Search([FromQuery] PersonSearchDto filter) =>
     await persons.SearchAsync(filter) is { } result
@@ -57,7 +67,7 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
   [HttpPut("{id:int}")]
   public async Task<ActionResult<PersonDto>> Update(int id, [FromBody] SavePersonDto dto)
   {
-    var result = await persons.UpdateAsync(currentUser.Id, id, dto);
+    var result = await persons.UpdateAsync(currentUser.Id, id, dto, BasicsOnly);
     return result.Outcome == PersonOutcome.Ok ? result.Person! : Map(result);
   }
 
@@ -65,6 +75,8 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
   [HttpPost("{id:int}/family/add")]
   public async Task<ActionResult<FamilyMemberDto>> AddFamilyMember(int id, [FromBody] SaveFamilyMemberDto dto)
   {
+    if (BasicsOnly)
+      return FamilyForbidden();
     var result = await persons.AddFamilyMemberAsync(currentUser.Id, id, dto);
     return result.Outcome == PersonOutcome.Ok
       ? CreatedAtAction(nameof(Get), new { id }, result.FamilyMember)
@@ -76,6 +88,8 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
   public async Task<ActionResult<FamilyMemberDto>> UpdateFamilyMember(
     int id, int familyCompId, [FromBody] SaveFamilyMemberDto dto)
   {
+    if (BasicsOnly)
+      return FamilyForbidden();
     var result = await persons.UpdateFamilyMemberAsync(currentUser.Id, id, familyCompId, dto);
     return result.Outcome == PersonOutcome.Ok ? result.FamilyMember! : Map(result);
   }
@@ -84,6 +98,8 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
   public async Task<IActionResult> RemoveFamilyMember(
     int id, int familyCompId, [FromBody] RemoveFamilyMemberDto? dto = null)
   {
+    if (BasicsOnly)
+      return FamilyForbidden();
     var result = await persons.RemoveFamilyMemberAsync(currentUser.Id, id, familyCompId, dto?.Remark);
     return result.Outcome == PersonOutcome.Ok ? NoContent() : Map(result);
   }
@@ -105,6 +121,7 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
     PersonOutcome.NotFound => NotFound(new { message = result.Message }),
     PersonOutcome.Duplicate => Conflict(new { message = result.Message, matches = result.Matches }),
     PersonOutcome.Stale => Conflict(new { message = result.Message, stale = true }),
+    PersonOutcome.Forbidden => StatusCode(StatusCodes.Status403Forbidden, new { message = result.Message }),
     _ => BadRequest(new { message = result.Message }),
   };
 

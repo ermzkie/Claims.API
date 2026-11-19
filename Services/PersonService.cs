@@ -16,6 +16,7 @@ public enum PersonOutcome
   Invalid,
   Duplicate,
   Stale,
+  Forbidden,
 }
 
 public record PersonResult(
@@ -222,7 +223,7 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
     return new PersonResult(PersonOutcome.Ok, Person: await GetAsync(person.PersonId));
   }
 
-  public async Task<PersonResult> UpdateAsync(int actorId, int id, SavePersonDto dto)
+  public async Task<PersonResult> UpdateAsync(int actorId, int id, SavePersonDto dto, bool basicsOnly = false)
   {
     var person = await db.People.FirstOrDefaultAsync(p => p.PersonId == id && p.Status);
     if (person is null)
@@ -233,6 +234,15 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
     {
       return new PersonResult(PersonOutcome.Stale,
         "Someone else changed this person while you were editing. Reload to see their changes, then edit again.");
+    }
+
+    // the front desk keeps to the basics; only a real change counts, the page resends everything
+    if (basicsOnly && (dto.CivilStatusId != person.CivilStatusId
+        || Clean(dto.SkillOccupation) != person.SkillOccupation
+        || dto.EstimatedMonthlyIncome != person.EstimatedMonthlyIncome))
+    {
+      return new PersonResult(PersonOutcome.Forbidden,
+        "Civil status, occupation and income are filled in by the social worker.");
     }
 
     var before = (person.LastName, person.FirstName, person.MiddleName, person.NameSuffixId, person.Birthdate);

@@ -111,4 +111,57 @@ public class AccessTests
     foreach (var path in new[] { "/api/queue/today", "/api/persons?search=santos", $"/api/persons/{o.PersonId}", "/api/lookups/lane-types" })
       Assert.True((await o.Front.GetAsync(path)).StatusCode == HttpStatusCode.OK, $"{path} should be 200 for a frontliner");
   }
+
+  private static object Basics(string contact, decimal? income = 8000m, short? civil = null, string? job = null) => new
+  {
+    firstName = "Maria",
+    lastName = "Santos",
+    contactNo = contact,
+    estimatedMonthlyIncome = income,
+    civilStatusId = civil,
+    skillOccupation = job,
+  };
+
+  [Fact]
+  public async Task Frontliner_CanEditBasics_NotIncome()
+  {
+    await using var o = await SetupAsync();
+    await using (var db = o.App.CreateDbContext())
+    {
+      db.CivilStatuses.Add(new CivilStatus { CivilStatusId = 1, CivilStatusDesc = "Single" });
+      await db.SaveChangesAsync();
+    }
+
+    Assert.Equal(HttpStatusCode.OK, (await o.Front.PutAsJsonAsync($"/api/persons/{o.PersonId}", Basics("09171234567"))).StatusCode);
+    foreach (var body in new[] { Basics("09171234567", income: 9000m), Basics("09171234567", civil: 1), Basics("09171234567", job: "Farmer") })
+    {
+      var r = await o.Front.PutAsJsonAsync($"/api/persons/{o.PersonId}", body);
+      Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
+      Assert.Contains("filled in by the social worker", await r.Content.ReadAsStringAsync());
+    }
+  }
+
+  [Fact]
+  public async Task Frontliner_ResendingSameIncome_IsAllowed()
+  {
+    await using var o = await SetupAsync();
+    var r = await o.Front.PutAsJsonAsync($"/api/persons/{o.PersonId}", Basics("09281112233", income: 8000m));
+    Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+  }
+
+  [Fact]
+  public async Task Frontliner_CannotChangeFamily()
+  {
+    await using var o = await SetupAsync();
+    var r = await o.Front.PostAsJsonAsync($"/api/persons/{o.PersonId}/family", new { familyPersonId = o.PersonId, relationshipStatusId = 1 });
+    Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
+  }
+
+  [Fact]
+  public async Task FrontlinerAndSocialWorker_CanEditIncome()
+  {
+    await using var o = await SetupAsync();
+    var r = await o.Both.PutAsJsonAsync($"/api/persons/{o.PersonId}", Basics("09171234567", income: 9500m));
+    Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+  }
 }

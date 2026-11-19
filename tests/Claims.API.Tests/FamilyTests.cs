@@ -17,7 +17,7 @@ public class FamilyTests
   {
     var app = new ClaimsApiFactory();
     await SeedRolesAsync(app);
-    var userId = await CreateUserAsync(app, "fl", Pw, "Frontliner");
+    var userId = await CreateUserAsync(app, "fl", Pw, "Social Worker");
     await using (var db = app.CreateDbContext())
     {
       db.Sexes.Add(new Sex { SexId = 1, SexCode = "M", SexDesc = "Male" });

@@ -327,6 +327,54 @@ public class TransactionSaveTests
   }
 
   [Fact]
+  public async Task Cancel_FrontlinerCanCancelAndUpdatesAuditFields()
+  {
+    await using var o = await SetupAsync();
+    int id;
+    int adminTransactionId;
+    await using (var db = o.App.CreateDbContext())
+    {
+      var transaction = new Transaction { Status = true, ApprovalStatusId = 1 };
+      var adminTransaction = new Transaction { Status = true, ApprovalStatusId = 1 };
+      db.Transactions.AddRange(transaction, adminTransaction);
+      await db.SaveChangesAsync();
+      id = transaction.TransactionId;
+      adminTransactionId = adminTransaction.TransactionId;
+    }
+
+    Assert.Equal(HttpStatusCode.Forbidden,
+      (await o.Worker.PostAsJsonAsync($"/api/transactions/{id}/cancel", new { reason = "duplicate" })).StatusCode);
+
+    var response = await o.Front.PostAsJsonAsync(
+      $"/api/transactions/{id}/cancel", new { reason = "duplicate" });
+    Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+
+    var adminResponse = await o.Admin.PostAsJsonAsync(
+      $"/api/transactions/{adminTransactionId}/cancel", new { reason = "duplicate" });
+    Assert.Equal(HttpStatusCode.NoContent, adminResponse.StatusCode);
+
+    await using var verify = o.App.CreateDbContext();
+    var cancelled = await verify.Transactions.SingleAsync(transaction => transaction.TransactionId == id);
+    var frontlinerId = await verify.Users
+      .Where(user => user.Username == "front")
+      .Select(user => user.UserId)
+      .SingleAsync();
+    Assert.False(cancelled.Status);
+    Assert.Equal(frontlinerId, cancelled.LastUpdatedBy);
+    Assert.Equal(o.App.Clock.GetUtcNow().UtcDateTime.AddHours(8), cancelled.DateLastUpdated);
+
+    var adminCancelled = await verify.Transactions
+      .SingleAsync(transaction => transaction.TransactionId == adminTransactionId);
+    var adminId = await verify.Users
+      .Where(user => user.Username == "admin")
+      .Select(user => user.UserId)
+      .SingleAsync();
+    Assert.False(adminCancelled.Status);
+    Assert.Equal(adminId, adminCancelled.LastUpdatedBy);
+    Assert.Equal(o.App.Clock.GetUtcNow().UtcDateTime.AddHours(8), adminCancelled.DateLastUpdated);
+  }
+
+  [Fact]
   public async Task CancellingAnOldSystemClaim_RemovesItFromTheTotals()
   {
     await using var o = await SetupAsync();

@@ -64,7 +64,20 @@ public partial class Transaction
     [Unicode(false)]
     public string? Remarks { get; set; }
 
-    public bool? IsReleased { get; set; }
+    [Column("ApprovalStatusID")]
+    public short ApprovalStatusId { get; set; }
+
+    public int? ApprovedBy { get; set; }
+
+    [Column(TypeName = "datetime")]
+    public DateTime? DateApproved { get; set; }
+
+    public bool IsReleased { get; set; }
+
+    public int? ReleasedBy { get; set; }
+
+    [Column(TypeName = "datetime")]
+    public DateTime? DateReleased { get; set; }
 
     public bool Status { get; set; }
 
@@ -77,6 +90,14 @@ public partial class Transaction
 
     [Column(TypeName = "datetime")]
     public DateTime? DateLastUpdated { get; set; }
+
+    [ForeignKey("ApprovalStatusId")]
+    [InverseProperty("Transactions")]
+    public virtual ApprovalStatus ApprovalStatus { get; set; } = null!;
+
+    [ForeignKey("ApprovedBy")]
+    [InverseProperty("TransactionApprovedByNavigations")]
+    public virtual User? ApprovedByNavigation { get; set; }
 
     [ForeignKey("CreditorId")]
     [InverseProperty("Transactions")]
@@ -98,12 +119,16 @@ public partial class Transaction
     [InverseProperty("TransactionPatientPeople")]
     public virtual Person? PatientPerson { get; set; }
 
+    [ForeignKey("ReleasedBy")]
+    [InverseProperty("TransactionReleasedByNavigations")]
+    public virtual User? ReleasedByNavigation { get; set; }
+
     [ForeignKey("RepresentativePersonId")]
     [InverseProperty("TransactionRepresentativePeople")]
     public virtual Person? RepresentativePerson { get; set; }
 
     [ForeignKey("SocialWorkerUserId")]
-    [InverseProperty("Transactions")]
+    [InverseProperty("TransactionSocialWorkerUsers")]
     public virtual User? SocialWorkerUser { get; set; }
 
     [InverseProperty("Transaction")]

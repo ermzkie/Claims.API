@@ -15,6 +15,8 @@ public partial class ApplicationDbContext : DbContext
     public DbSet<AnnualBalanceResult> AnnualBalanceResults { get; set; }
     public virtual DbSet<Address> Addresses { get; set; }
 
+    public virtual DbSet<ApprovalStatus> ApprovalStatuses { get; set; }
+
     public virtual DbSet<Assistance> Assistances { get; set; }
 
     public virtual DbSet<AuditLog> AuditLogs { get; set; }
@@ -181,9 +183,15 @@ public partial class ApplicationDbContext : DbContext
 
         modelBuilder.Entity<Transaction>(entity =>
         {
+            entity.Property(e => e.ApprovalStatusId).HasDefaultValue((short)1, "DF_Transactions_IsApproved");
             entity.Property(e => e.DateCreated).HasDefaultValueSql("(getdate())", "DF_Transactions_DateCreated");
-            entity.Property(e => e.IsReleased).HasDefaultValue(false, "DF_Transactions_IsReleased");
             entity.Property(e => e.Status).HasDefaultValue(true, "DF_Transactions_isActive");
+
+            entity.HasOne(d => d.ApprovalStatus).WithMany(p => p.Transactions)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_Transactions_ApprovalStatus");
+
+            entity.HasOne(d => d.ApprovedByNavigation).WithMany(p => p.TransactionApprovedByNavigations).HasConstraintName("FK_Transactions_User");
 
             entity.HasOne(d => d.Creditor).WithMany(p => p.Transactions).HasConstraintName("FK_Transactions_Creditor");
 
@@ -195,9 +203,11 @@ public partial class ApplicationDbContext : DbContext
 
             entity.HasOne(d => d.PatientPerson).WithMany(p => p.TransactionPatientPeople).HasConstraintName("FK_Transactions_Person");
 
+            entity.HasOne(d => d.ReleasedByNavigation).WithMany(p => p.TransactionReleasedByNavigations).HasConstraintName("FK_Transactions_User1");
+
             entity.HasOne(d => d.RepresentativePerson).WithMany(p => p.TransactionRepresentativePeople).HasConstraintName("FK_Transactions_Representative");
 
-            entity.HasOne(d => d.SocialWorkerUser).WithMany(p => p.Transactions).HasConstraintName("FK_Transactions_SocialWorkerUser");
+            entity.HasOne(d => d.SocialWorkerUser).WithMany(p => p.TransactionSocialWorkerUsers).HasConstraintName("FK_Transactions_SocialWorkerUser");
         });
 
         modelBuilder.Entity<TransactionService>(entity =>

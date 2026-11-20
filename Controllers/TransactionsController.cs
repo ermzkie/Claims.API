@@ -32,6 +32,7 @@ public class TransactionsController(
     currentUser.IsInRole(RoleNames.SuperAdministrator) || currentUser.IsInRole(RoleNames.Administrator);
 
   private bool CanHandleMoney => IsAdmin || currentUser.IsInRole(RoleNames.SocialWorker);
+  private bool CanApprove => IsAdmin || currentUser.IsInRole(RoleNames.Approver);
 
   private DateTime Now() => time.GetUtcNow().UtcDateTime.AddHours(8);
 
@@ -412,6 +413,130 @@ public class TransactionsController(
     return Ok(TransactionResponseMapper.ToResponse(transaction));
   }
 
+  [HttpPost("{id:int}/submit-for-approval")]
+  public async Task<ActionResult<TransactionResponseDto>> SubmitTransactionForApproval(
+    int id,
+    CancellationToken cancellationToken)
+  {
+    if (!CanHandleMoney)
+      return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only social workers and admins can submit claims for approval." });
+
+    var transaction = await LoadAsync(id, cancellationToken, tracking: true);
+    if (transaction is null)
+      return NotFound(new { message = "Transaction not found." });
+    if (ClaimRules.IsCancelled(transaction))
+      return Conflict(new { message = "This claim was cancelled." });
+    if (transaction.IsReleased == true)
+      return Conflict(new { message = "This claim is already released." });
+
+    if (transaction.ApprovalStatusId == 2)
+      return Ok(TransactionResponseMapper.ToResponse(transaction));
+
+    var previous = transaction.ApprovalStatusId;
+    var now = Now();
+    transaction.ApprovalStatusId = 2;
+    Touch(transaction, now);
+    Log(transaction, "Submitted for approval",
+      new Dictionary<string, object?> { ["approvalStatusId"] = previous },
+      new Dictionary<string, object?> { ["approvalStatusId"] = transaction.ApprovalStatusId },
+      null, now);
+    if (!await TrySaveAsync(cancellationToken))
+      return Changed();
+
+    return Ok(TransactionResponseMapper.ToResponse(transaction));
+  }
+
+  [HttpPost("{id:int}/approve")]
+  public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
+    int id,
+    CancellationToken cancellationToken)
+  {
+    if (!CanApprove)
+      return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only approvers and admins can approve claims." });
+
+    var transaction = await LoadAsync(id, cancellationToken, tracking: true);
+    if (transaction is null)
+      return NotFound(new { message = "Transaction not found." });
+    if (ClaimRules.IsCancelled(transaction))
+      return Conflict(new { message = "This claim was cancelled." });
+    if (transaction.IsReleased == true)
+      return Conflict(new { message = "This claim is already released." });
+
+    if (transaction.ApprovalStatusId == 3)
+      return Ok(TransactionResponseMapper.ToResponse(transaction));
+
+    var previousStatus = transaction.ApprovalStatusId;
+    var previousApprovedBy = transaction.ApprovedBy;
+    var previousDateApproved = transaction.DateApproved;
+    var now = Now();
+    transaction.ApprovalStatusId = 3;
+    transaction.ApprovedBy = currentUser.Id;
+    transaction.DateApproved = now;
+    Touch(transaction, now);
+    Log(transaction, "Approved the transaction",
+      new Dictionary<string, object?>
+      {
+        ["approvalStatusId"] = previousStatus,
+        ["approvedBy"] = previousApprovedBy,
+        ["dateApproved"] = previousDateApproved,
+      },
+      new Dictionary<string, object?>
+      {
+        ["approvalStatusId"] = transaction.ApprovalStatusId,
+        ["approvedBy"] = transaction.ApprovedBy,
+        ["dateApproved"] = transaction.DateApproved,
+      },
+      null, now);
+    if (!await TrySaveAsync(cancellationToken))
+      return Changed();
+
+    return Ok(TransactionResponseMapper.ToResponse(transaction));
+  }
+
+  [HttpPost("{id:int}/release")]
+  public async Task<ActionResult<TransactionResponseDto>> ReleaseTransaction(
+    int id,
+    CancellationToken cancellationToken)
+  {
+    if (!CanHandleMoney)
+      return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only social workers and admins can release claims." });
+
+    var transaction = await LoadAsync(id, cancellationToken, tracking: true);
+    if (transaction is null)
+      return NotFound(new { message = "Transaction not found." });
+    if (ClaimRules.IsCancelled(transaction))
+      return Conflict(new { message = "This claim was cancelled." });
+    if (transaction.IsReleased == true)
+      return Conflict(new { message = "This claim is already released." });
+
+    var previousIsReleased = transaction.IsReleased;
+    var previousReleasedBy = transaction.ReleasedBy;
+    var previousDateReleased = transaction.DateReleased;
+    var now = Now();
+    transaction.IsReleased = true;
+    transaction.ReleasedBy = currentUser.Id;
+    transaction.DateReleased = now;
+    Touch(transaction, now);
+    Log(transaction, "Released",
+      new Dictionary<string, object?>
+      {
+        ["isReleased"] = previousIsReleased,
+        ["releasedBy"] = previousReleasedBy,
+        ["dateReleased"] = previousDateReleased,
+      },
+      new Dictionary<string, object?>
+      {
+        ["isReleased"] = transaction.IsReleased,
+        ["releasedBy"] = transaction.ReleasedBy,
+        ["dateReleased"] = transaction.DateReleased,
+      },
+      null, now);
+    if (!await TrySaveAsync(cancellationToken))
+      return Changed();
+
+    return Ok(TransactionResponseMapper.ToResponse(transaction));
+  }
+
   [HttpPost("{id:int}/cancel")]
   public Task<IActionResult> Cancel(int id, ReasonRequest request, CancellationToken cancellationToken) =>
     CancelAsync(id, request.Reason, cancellationToken);
@@ -451,8 +576,8 @@ public class TransactionsController(
 
   private async Task<IActionResult> CancelAsync(int id, string? reason, CancellationToken cancellationToken)
   {
-    if (!IsAdmin)
-      return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only admins can cancel claims." });
+    if (!IsAdmin && !currentUser.IsInRole(RoleNames.Frontliner))
+      return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only frontliners and admins can cancel claims." });
 
     var transaction = await context.Transactions.FirstOrDefaultAsync(x => x.TransactionId == id, cancellationToken);
     if (transaction is null)
@@ -555,7 +680,7 @@ public class TransactionsController(
     ["amount"] = t.Amount,
     ["socialWorkerAssessment"] = Text(t.SocialWorkerAssessment, null),
     ["remarks"] = Text(t.Remarks, null),
-    ["isReleased"] = t.IsReleased ?? false,
+    ["isReleased"] = t.IsReleased,
     ["natureIds"] = string.Join(",", t.TransactionServices
       .Where(s => s.NatureId.HasValue).Select(s => s.NatureId!.Value).OrderBy(n => n)),
   };

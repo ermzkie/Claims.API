@@ -1,9 +1,10 @@
+using System;
 
 namespace Claims.API.DTOs.Reports;
 
 public class PerennialClientReportParameters
 {
-    public string? AssistanceCode { get; set; }
+    public short? SourceId { get; set; }
 
     public DateTime? DateFrom { get; set; }
 

@@ -459,6 +459,195 @@ public class TransactionTests
   }
 
   [Fact]
+  public async Task SubmitTransactionForApproval_RequiresSocialWorkerOrAdminAndUpdatesApprovalStatus()
+  {
+    await using var app = new ClaimsApiFactory();
+    await SeedRolesAsync(app);
+    var workerId = await CreateUserAsync(app, "approval-worker", Password, "Social Worker");
+    var existingWorkerId = await CreateUserAsync(app, "existing-worker", Password, "Social Worker");
+    await CreateUserAsync(app, "approval-admin", Password, "Administrator");
+    await CreateUserAsync(app, "approval-frontliner", Password, "Frontliner");
+    using var worker = await LoginAsAsync(app, "approval-worker", Password);
+    using var admin = await LoginAsAsync(app, "approval-admin", Password);
+    using var frontliner = await LoginAsAsync(app, "approval-frontliner", Password);
+
+    int workerTransactionId;
+    int adminTransactionId;
+    int forbiddenTransactionId;
+    await using (var db = app.CreateDbContext())
+    {
+      db.ApprovalStatuses.AddRange(
+        new ApprovalStatus { ApprovalStatusId = 1 },
+        new ApprovalStatus { ApprovalStatusId = 2 });
+      var workerTransaction = new Transaction
+        { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = existingWorkerId };
+      var adminTransaction = new Transaction
+        { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = existingWorkerId };
+      var forbiddenTransaction = new Transaction
+        { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = existingWorkerId };
+      db.Transactions.AddRange(workerTransaction, adminTransaction, forbiddenTransaction);
+      await db.SaveChangesAsync();
+      workerTransactionId = workerTransaction.TransactionId;
+      adminTransactionId = adminTransaction.TransactionId;
+      forbiddenTransactionId = forbiddenTransaction.TransactionId;
+    }
+
+    var workerResponse = await worker.PostAsync(
+      $"/api/transactions/{workerTransactionId}/submit-for-approval", content: null);
+    Assert.Equal(HttpStatusCode.OK, workerResponse.StatusCode);
+
+    var adminResponse = await admin.PostAsync(
+      $"/api/transactions/{adminTransactionId}/submit-for-approval", content: null);
+    Assert.Equal(HttpStatusCode.OK, adminResponse.StatusCode);
+
+    var forbiddenResponse = await frontliner.PostAsync(
+      $"/api/transactions/{forbiddenTransactionId}/submit-for-approval", content: null);
+    Assert.Equal(HttpStatusCode.Forbidden, forbiddenResponse.StatusCode);
+
+    await using var verify = app.CreateDbContext();
+    var submitted = await verify.Transactions
+      .Where(item => item.TransactionId == workerTransactionId || item.TransactionId == adminTransactionId)
+      .ToListAsync();
+    Assert.All(submitted, transaction =>
+    {
+      Assert.Equal((short)2, transaction.ApprovalStatusId);
+      Assert.Equal(existingWorkerId, transaction.SocialWorkerUserId);
+    });
+
+    var notSubmitted = await verify.Transactions.SingleAsync(item => item.TransactionId == forbiddenTransactionId);
+    Assert.Equal((short)1, notSubmitted.ApprovalStatusId);
+    Assert.Equal(existingWorkerId, notSubmitted.SocialWorkerUserId);
+    Assert.Equal(workerId, (await worker.GetFromJsonAsync<TransactionResponseDto>(
+      $"/api/transactions/{workerTransactionId}"))!.LastUpdatedBy);
+  }
+
+  [Fact]
+  public async Task ApproveTransaction_RequiresApproverOrAdministratorAndSetsApprovalFields()
+  {
+    await using var app = new ClaimsApiFactory();
+    await SeedRolesAsync(app);
+    var approverId = await CreateUserAsync(app, "approver", Password, "Approver");
+    var adminId = await CreateUserAsync(app, "approval-admin", Password, "Administrator");
+    await CreateUserAsync(app, "approval-superadmin", Password, "Super Administrator");
+    await CreateUserAsync(app, "approval-worker", Password, "Social Worker");
+    using var approver = await LoginAsAsync(app, "approver", Password);
+    using var admin = await LoginAsAsync(app, "approval-admin", Password);
+    using var superAdmin = await LoginAsAsync(app, "approval-superadmin", Password);
+    using var worker = await LoginAsAsync(app, "approval-worker", Password);
+
+    int approverTransactionId;
+    int adminTransactionId;
+    int superAdminTransactionId;
+    int workerTransactionId;
+    await using (var db = app.CreateDbContext())
+    {
+      db.ApprovalStatuses.AddRange(
+        new ApprovalStatus { ApprovalStatusId = 2 },
+        new ApprovalStatus { ApprovalStatusId = 3 });
+      var approverTransaction = new Transaction { Status = true, ApprovalStatusId = 2 };
+      var adminTransaction = new Transaction { Status = true, ApprovalStatusId = 2 };
+      var superAdminTransaction = new Transaction { Status = true, ApprovalStatusId = 2 };
+      var workerTransaction = new Transaction { Status = true, ApprovalStatusId = 2 };
+      db.Transactions.AddRange(
+        approverTransaction, adminTransaction, superAdminTransaction, workerTransaction);
+      await db.SaveChangesAsync();
+      approverTransactionId = approverTransaction.TransactionId;
+      adminTransactionId = adminTransaction.TransactionId;
+      superAdminTransactionId = superAdminTransaction.TransactionId;
+      workerTransactionId = workerTransaction.TransactionId;
+    }
+
+    Assert.Equal(HttpStatusCode.OK, (await approver.PostAsync(
+      $"/api/transactions/{approverTransactionId}/approve", content: null)).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await admin.PostAsync(
+      $"/api/transactions/{adminTransactionId}/approve", content: null)).StatusCode);
+    Assert.Equal(HttpStatusCode.Forbidden, (await superAdmin.PostAsync(
+      $"/api/transactions/{superAdminTransactionId}/approve", content: null)).StatusCode);
+    Assert.Equal(HttpStatusCode.Forbidden, (await worker.PostAsync(
+      $"/api/transactions/{workerTransactionId}/approve", content: null)).StatusCode);
+
+    await using var verify = app.CreateDbContext();
+    var approvedByApprover = await verify.Transactions
+      .SingleAsync(transaction => transaction.TransactionId == approverTransactionId);
+    Assert.Equal((short)3, approvedByApprover.ApprovalStatusId);
+    Assert.Equal(approverId, approvedByApprover.ApprovedBy);
+    Assert.Equal(app.Clock.GetUtcNow().UtcDateTime.AddHours(8), approvedByApprover.DateApproved);
+
+    var approvedByAdmin = await verify.Transactions
+      .SingleAsync(transaction => transaction.TransactionId == adminTransactionId);
+    Assert.Equal((short)3, approvedByAdmin.ApprovalStatusId);
+    Assert.Equal(adminId, approvedByAdmin.ApprovedBy);
+    Assert.Equal(app.Clock.GetUtcNow().UtcDateTime.AddHours(8), approvedByAdmin.DateApproved);
+
+    var unchangedTransactions = await verify.Transactions
+      .Where(transaction =>
+        transaction.TransactionId == superAdminTransactionId ||
+        transaction.TransactionId == workerTransactionId)
+      .ToListAsync();
+    Assert.All(unchangedTransactions, transaction =>
+    {
+      Assert.Equal((short)2, transaction.ApprovalStatusId);
+      Assert.Null(transaction.ApprovedBy);
+      Assert.Null(transaction.DateApproved);
+    });
+  }
+
+  [Fact]
+  public async Task ReleaseTransaction_RequiresSocialWorkerOrAdminAndSetsReleaseFields()
+  {
+    await using var app = new ClaimsApiFactory();
+    await SeedRolesAsync(app);
+    var workerId = await CreateUserAsync(app, "release-worker", Password, "Social Worker");
+    var adminId = await CreateUserAsync(app, "release-admin", Password, "Administrator");
+    await CreateUserAsync(app, "release-frontliner", Password, "Frontliner");
+    using var worker = await LoginAsAsync(app, "release-worker", Password);
+    using var admin = await LoginAsAsync(app, "release-admin", Password);
+    using var frontliner = await LoginAsAsync(app, "release-frontliner", Password);
+
+    int workerTransactionId;
+    int adminTransactionId;
+    int forbiddenTransactionId;
+    await using (var db = app.CreateDbContext())
+    {
+      db.ApprovalStatuses.Add(new ApprovalStatus { ApprovalStatusId = 1 });
+      var workerTransaction = new Transaction { Status = true, ApprovalStatusId = 1 };
+      var adminTransaction = new Transaction { Status = true, ApprovalStatusId = 1 };
+      var forbiddenTransaction = new Transaction { Status = true, ApprovalStatusId = 1 };
+      db.Transactions.AddRange(workerTransaction, adminTransaction, forbiddenTransaction);
+      await db.SaveChangesAsync();
+      workerTransactionId = workerTransaction.TransactionId;
+      adminTransactionId = adminTransaction.TransactionId;
+      forbiddenTransactionId = forbiddenTransaction.TransactionId;
+    }
+
+    Assert.Equal(HttpStatusCode.OK, (await worker.PostAsync(
+      $"/api/transactions/{workerTransactionId}/release", content: null)).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await admin.PostAsync(
+      $"/api/transactions/{adminTransactionId}/release", content: null)).StatusCode);
+    Assert.Equal(HttpStatusCode.Forbidden, (await frontliner.PostAsync(
+      $"/api/transactions/{forbiddenTransactionId}/release", content: null)).StatusCode);
+
+    await using var verify = app.CreateDbContext();
+    var releasedByWorker = await verify.Transactions
+      .SingleAsync(transaction => transaction.TransactionId == workerTransactionId);
+    Assert.True(releasedByWorker.IsReleased);
+    Assert.Equal(workerId, releasedByWorker.ReleasedBy);
+    Assert.Equal(app.Clock.GetUtcNow().UtcDateTime.AddHours(8), releasedByWorker.DateReleased);
+
+    var releasedByAdmin = await verify.Transactions
+      .SingleAsync(transaction => transaction.TransactionId == adminTransactionId);
+    Assert.True(releasedByAdmin.IsReleased);
+    Assert.Equal(adminId, releasedByAdmin.ReleasedBy);
+    Assert.Equal(app.Clock.GetUtcNow().UtcDateTime.AddHours(8), releasedByAdmin.DateReleased);
+
+    var notReleased = await verify.Transactions
+      .SingleAsync(transaction => transaction.TransactionId == forbiddenTransactionId);
+    Assert.False(notReleased.IsReleased);
+    Assert.Null(notReleased.ReleasedBy);
+    Assert.Null(notReleased.DateReleased);
+  }
+
+  [Fact]
   public async Task GetAllCurrentTransactionsOfSocialWorker_ReturnsOnlyTransactionsAssignedToCurrentUser()
   {
     await using var app = new ClaimsApiFactory();

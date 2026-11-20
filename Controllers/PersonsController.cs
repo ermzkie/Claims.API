@@ -86,6 +86,12 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
     return result.Outcome == PersonOutcome.Ok ? NoContent() : Map(result);
   }
 
+  [HttpGet("{id:int}/history")]
+  public async Task<ActionResult<List<PersonChangeDto>>> History(int id) =>
+    await persons.HistoryAsync(id) is { } history
+      ? history
+      : NotFound(new { message = "Person not found." });
+
   [HttpGet("{id:int}/family/history")]
   public async Task<ActionResult<List<FamilyChangeDto>>> FamilyHistory(int id) =>
     await persons.FamilyHistoryAsync(id) is { } history
@@ -96,6 +102,7 @@ public class PersonsController(PersonService persons, ICurrentUser currentUser) 
   {
     PersonOutcome.NotFound => NotFound(new { message = result.Message }),
     PersonOutcome.Duplicate => Conflict(new { message = result.Message, matches = result.Matches }),
+    PersonOutcome.Stale => Conflict(new { message = result.Message, stale = true }),
     _ => BadRequest(new { message = result.Message }),
   };
 

@@ -328,7 +328,6 @@ public class TransactionSaveTests
     int adminTransactionId;
     await using (var db = o.App.CreateDbContext())
     {
-      db.ApprovalStatuses.Add(new ApprovalStatus { ApprovalStatusId = 1 });
       var transaction = new Transaction { Status = true, ApprovalStatusId = 1 };
       var adminTransaction = new Transaction { Status = true, ApprovalStatusId = 1 };
       db.Transactions.AddRange(transaction, adminTransaction);

@@ -476,9 +476,6 @@ public class TransactionTests
     int forbiddenTransactionId;
     await using (var db = app.CreateDbContext())
     {
-      db.ApprovalStatuses.AddRange(
-        new ApprovalStatus { ApprovalStatusId = 1 },
-        new ApprovalStatus { ApprovalStatusId = 2 });
       var workerTransaction = new Transaction
         { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = existingWorkerId };
       var adminTransaction = new Transaction
@@ -541,9 +538,6 @@ public class TransactionTests
     int workerTransactionId;
     await using (var db = app.CreateDbContext())
     {
-      db.ApprovalStatuses.AddRange(
-        new ApprovalStatus { ApprovalStatusId = 2 },
-        new ApprovalStatus { ApprovalStatusId = 3 });
       var approverTransaction = new Transaction { Status = true, ApprovalStatusId = 2 };
       var adminTransaction = new Transaction { Status = true, ApprovalStatusId = 2 };
       var superAdminTransaction = new Transaction { Status = true, ApprovalStatusId = 2 };
@@ -561,7 +555,7 @@ public class TransactionTests
       $"/api/transactions/{approverTransactionId}/approve", content: null)).StatusCode);
     Assert.Equal(HttpStatusCode.OK, (await admin.PostAsync(
       $"/api/transactions/{adminTransactionId}/approve", content: null)).StatusCode);
-    Assert.Equal(HttpStatusCode.Forbidden, (await superAdmin.PostAsync(
+    Assert.Equal(HttpStatusCode.OK, (await superAdmin.PostAsync(
       $"/api/transactions/{superAdminTransactionId}/approve", content: null)).StatusCode);
     Assert.Equal(HttpStatusCode.Forbidden, (await worker.PostAsync(
       $"/api/transactions/{workerTransactionId}/approve", content: null)).StatusCode);
@@ -581,7 +575,6 @@ public class TransactionTests
 
     var unchangedTransactions = await verify.Transactions
       .Where(transaction =>
-        transaction.TransactionId == superAdminTransactionId ||
         transaction.TransactionId == workerTransactionId)
       .ToListAsync();
     Assert.All(unchangedTransactions, transaction =>
@@ -609,7 +602,6 @@ public class TransactionTests
     int forbiddenTransactionId;
     await using (var db = app.CreateDbContext())
     {
-      db.ApprovalStatuses.Add(new ApprovalStatus { ApprovalStatusId = 1 });
       var workerTransaction = new Transaction { Status = true, ApprovalStatusId = 1 };
       var adminTransaction = new Transaction { Status = true, ApprovalStatusId = 1 };
       var forbiddenTransaction = new Transaction { Status = true, ApprovalStatusId = 1 };

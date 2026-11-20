@@ -1,4 +1,5 @@
 using Claims.API.Data;
+using Claims.API.Models;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
@@ -55,7 +56,15 @@ public class ClaimsApiFactory : WebApplicationFactory<Program>
   {
     var host = base.CreateHost(builder);
     using var scope = host.Services.CreateScope();
-    scope.ServiceProvider.GetRequiredService<ApplicationDbContext>().Database.EnsureCreated();
+    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    db.Database.EnsureCreated();
+    // every claim points at a status, so the lookup rows must exist like in the real DB
+    if (!db.ApprovalStatuses.Any())
+      db.ApprovalStatuses.AddRange(
+        new ApprovalStatus { ApprovalStatusId = 1, ApprovalStatusCode = "P", ApprovalStatusDesc = "Pending" },
+        new ApprovalStatus { ApprovalStatusId = 2, ApprovalStatusCode = "R", ApprovalStatusDesc = "For Approval" },
+        new ApprovalStatus { ApprovalStatusId = 3, ApprovalStatusCode = "A", ApprovalStatusDesc = "Approved" });
+    db.SaveChanges();
     return host;
   }
 

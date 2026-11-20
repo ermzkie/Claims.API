@@ -1,15 +1,14 @@
-
 namespace Claims.API.DTOs.Reports;
 
 public class PerennialClientReportDto
 {
     public int PatientPersonId { get; set; }
 
-    public string PatientName { get; set; } = string.Empty;
+    public string? PatientName { get; set; }
 
-    public string PatientAddress { get; set; } = string.Empty;
+    public string? PatientAddress { get; set; }
 
-    public string AssistanceCode { get; set; } = string.Empty;
+    public string? AssistanceType { get; set; }
 
     public int AvailmentCount { get; set; }
 

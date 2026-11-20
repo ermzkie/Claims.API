@@ -67,6 +67,8 @@ public class TransactionSaveTests
     var lastYear = new FundSource { FundSourceId = 602, Year = 2025, Status = true };
     db.AddRange(lane, patient, creditor, removed, fund, lastYear);
     await db.SaveChangesAsync();
+    // keyless table
+    await db.Database.ExecuteSqlRawAsync("INSERT INTO Assistance (AssistanceID, AssistanceCode, AssistanceType) VALUES (1, 'AICS', 'AICS')");
     office.LaneId = lane.LaneTypeId;
     office.PatientId = patient.PersonId;
     office.CreditorId = creditor.CreditorId;
@@ -180,6 +182,7 @@ public class TransactionSaveTests
     Assert.Equal(HttpStatusCode.Forbidden, (await Save(o.Front, new { transactionId = id, creditorId = o.CreditorId })).StatusCode);
     Assert.Equal(HttpStatusCode.Forbidden, (await Save(o.Front, new { transactionId = id, isReleased = true })).StatusCode);
     Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Front, new { transactionId = id, remarks = "walk-in" })).StatusCode);
+    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
     Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, amount = 5000m })).StatusCode);
   }
 
@@ -188,6 +191,7 @@ public class TransactionSaveTests
   {
     await using var o = await SetupAsync();
     var id = await CreateAsync(o);
+    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
     Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new
     {
       transactionId = id,
@@ -216,11 +220,12 @@ public class TransactionSaveTests
   {
     await using var o = await SetupAsync();
     var id = await CreateAsync(o);
+    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
 
     var noAmount = await Save(o.Worker, new { transactionId = id, isReleased = true });
     Assert.Equal(HttpStatusCode.BadRequest, noAmount.StatusCode);
 
-    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, amount = 3000m, isReleased = true })).StatusCode);
+    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, amount = 3000m, isReleased = true, assistanceCode = "AICS" })).StatusCode);
 
     Assert.Equal(HttpStatusCode.Conflict, (await Save(o.Worker, new { transactionId = id, amount = 4000m })).StatusCode);
     Assert.Equal(HttpStatusCode.Conflict, (await Save(o.Worker, new { transactionId = id, isReleased = false })).StatusCode);
@@ -231,10 +236,10 @@ public class TransactionSaveTests
     Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, amount = 4000m })).StatusCode);
 
     var history = await History(o, id);
-    Assert.Equal(["Created", "Released", "Reopened", "Updated"], history.Select(h => h.Action));
-    Assert.Contains("3000", history[1].NewValues);
-    Assert.Contains("4000", history[3].NewValues);
-    Assert.Contains("3000", history[3].OldValues);
+    Assert.Equal(["Created", "CheckedOut", "Released", "Reopened", "Updated"], history.Select(h => h.Action));
+    Assert.Contains("3000", history[2].NewValues);
+    Assert.Contains("4000", history[4].NewValues);
+    Assert.Contains("3000", history[4].OldValues);
   }
 
   [Fact]
@@ -242,6 +247,7 @@ public class TransactionSaveTests
   {
     await using var o = await SetupAsync();
     var id = await CreateAsync(o);
+    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
 
     async Task Bad(HttpClient client, object body)
     {
@@ -457,5 +463,64 @@ public class TransactionSaveTests
 
     Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
     Assert.Equal(["Created"], (await History(o, id)).Select(h => h.Action));
+  }
+
+  [Fact]
+  public async Task Save_ProgramIsCheckedAndStoredUpper()
+  {
+    await using var o = await SetupAsync();
+    var id = await CreateAsync(o);
+    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
+
+    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, assistanceCode = " aics " })).StatusCode);
+    var saved = await o.Worker.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{id}");
+    Assert.Equal("AICS", saved!.AssistanceCode);
+
+    var bad = await Save(o.Worker, new { transactionId = id, assistanceCode = "NOPE" });
+    Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+    Assert.Contains("Program was not found.", await bad.Content.ReadAsStringAsync());
+  }
+
+  [Fact]
+  public async Task Release_NeedsProgram()
+  {
+    await using var o = await SetupAsync();
+    var id = await CreateAsync(o);
+    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
+    await Save(o.Worker, new { transactionId = id, amount = 100m });
+
+    var noProgram = await Save(o.Worker, new { transactionId = id, isReleased = true });
+    Assert.Equal(HttpStatusCode.BadRequest, noProgram.StatusCode);
+    Assert.Contains("Set the program before releasing the claim.", await noProgram.Content.ReadAsStringAsync());
+
+    var ok = await Save(o.Worker, new { transactionId = id, isReleased = true, assistanceCode = "AICS" });
+    Assert.Equal(HttpStatusCode.NoContent, ok.StatusCode);
+  }
+
+  [Fact]
+  public async Task Save_MoneyOnClaimHeldByOther_Is403_AdminCan()
+  {
+    await using var o = await SetupAsync();
+    var id = await CreateAsync(o);
+    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
+
+    var other = await Save(o.Worker2, new { transactionId = id, amount = 50m });
+    Assert.Equal(HttpStatusCode.Forbidden, other.StatusCode);
+    Assert.Contains("Ana Reyes", await other.Content.ReadAsStringAsync());
+
+    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Admin, new { transactionId = id, amount = 50m })).StatusCode);
+  }
+
+  [Fact]
+  public async Task Save_MoneyOnUnheldClaim_NeedsCheckout()
+  {
+    await using var o = await SetupAsync();
+    var id = await CreateAsync(o);
+
+    var money = await Save(o.Worker, new { transactionId = id, amount = 50m });
+    Assert.Equal(HttpStatusCode.Forbidden, money.StatusCode);
+    Assert.Contains("Check out the claim first.", await money.Content.ReadAsStringAsync());
+
+    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Front, new { transactionId = id, remarks = "brought papers" })).StatusCode);
   }
 }

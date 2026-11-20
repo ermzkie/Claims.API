@@ -26,7 +26,7 @@ public class TransactionsController(
 
   // fields only social workers and admins may change
   private static readonly string[] MoneyFields =
-    ["fundSourceId", "creditorId", "modeId", "amount", "socialWorkerAssessment", "isReleased"];
+    ["fundSourceId", "creditorId", "modeId", "amount", "socialWorkerAssessment", "isReleased", "assistanceCode"];
 
   private bool IsAdmin =>
     currentUser.IsInRole(RoleNames.SuperAdministrator) || currentUser.IsInRole(RoleNames.Administrator);
@@ -235,6 +235,7 @@ public class TransactionsController(
       SocialWorkerAssessment = Text(dto.SocialWorkerAssessment, transaction?.SocialWorkerAssessment),
       Remarks = Text(dto.Remarks, transaction?.Remarks),
       IsReleased = dto.IsReleased ?? transaction?.IsReleased ?? false,
+      AssistanceCode = Text(dto.AssistanceCode, transaction?.AssistanceCode)?.ToUpperInvariant(),
     };
     var natureIds = dto.NatureIds?.Distinct().OrderBy(n => n).ToList()
       ?? transaction?.TransactionServices.Where(s => s.NatureId.HasValue)
@@ -264,7 +265,21 @@ public class TransactionsController(
     {
       return StatusCode(StatusCodes.Status403Forbidden, new
       {
-        message = "Only social workers and admins can set the amount, creditor, fund source, mode, assessment or release.",
+        message = "Only social workers and admins can set the amount, creditor, fund source, mode, assessment, program or release.",
+      });
+    }
+
+    // the worker serving the claim finishes it; admins can always step in
+    if (!isNew && !IsAdmin && transaction!.SocialWorkerUserId != currentUser.Id && changed.Any(k => MoneyFields.Contains(k)))
+    {
+      if (transaction.SocialWorkerUserId is null)
+        return StatusCode(StatusCodes.Status403Forbidden, new { message = "Check out the claim first." });
+      var holder = await context.Users.AsNoTracking()
+        .Where(u => u.UserId == transaction.SocialWorkerUserId)
+        .FirstOrDefaultAsync(cancellationToken);
+      return StatusCode(StatusCodes.Status403Forbidden, new
+      {
+        message = $"{FullName(holder) ?? "Another social worker"} is handling this claim.",
       });
     }
 
@@ -321,6 +336,7 @@ public class TransactionsController(
     transaction.SocialWorkerAssessment = next.SocialWorkerAssessment;
     transaction.Remarks = next.Remarks;
     transaction.IsReleased = next.IsReleased;
+    transaction.AssistanceCode = next.AssistanceCode;
 
     if (changed.Contains("natureIds"))
     {
@@ -395,9 +411,9 @@ public class TransactionsController(
       }
       if (string.IsNullOrEmpty(reason))
         return BadRequest(new { message = "Give a reason for taking over the claim." });
-      if (reason.Length > MaxReason)
-        return BadRequest(new { message = $"Keep the reason under {MaxReason} characters." });
     }
+    if (reason?.Length > MaxReason)
+      return BadRequest(new { message = $"Keep the reason under {MaxReason} characters." });
 
     var now = Now();
     transaction.SocialWorkerUserId = currentUser.Id;
@@ -405,7 +421,8 @@ public class TransactionsController(
     Log(transaction, previous is null ? "CheckedOut" : "TakenOver",
       previous is null ? null : new Dictionary<string, object?> { ["socialWorkerUserId"] = previous },
       new Dictionary<string, object?> { ["socialWorkerUserId"] = currentUser.Id },
-      previous is null ? null : reason, now);
+      // a plain checkout can carry a note too, e.g. bringing back a client marked not served
+      string.IsNullOrEmpty(reason) ? null : reason, now);
     if (!await TrySaveAsync(cancellationToken))
       return Changed();
     await context.Entry(transaction).Reference(x => x.SocialWorkerUser).LoadAsync(cancellationToken);
@@ -655,8 +672,17 @@ public class TransactionsController(
         return "Amount can only have centavos (2 decimals).";
     }
 
+    if (next.AssistanceCode is not null && Changed("assistanceCode"))
+    {
+      var code = next.AssistanceCode;
+      if (!await context.Assistances.AnyAsync(x => x.AssistanceCode != null && x.AssistanceCode.Trim().ToUpper() == code, ct))
+        return "Program was not found.";
+    }
+
     if (next.IsReleased == true && current?.IsReleased != true && next.Amount is null)
       return "Set the amount before releasing the claim.";
+    if (next.IsReleased == true && current?.IsReleased != true && next.AssistanceCode is null)
+      return "Set the program before releasing the claim.";
 
     if (Changed("natureIds") && natureIds.Count > 0)
     {
@@ -681,6 +707,7 @@ public class TransactionsController(
     ["socialWorkerAssessment"] = Text(t.SocialWorkerAssessment, null),
     ["remarks"] = Text(t.Remarks, null),
     ["isReleased"] = t.IsReleased,
+    ["assistanceCode"] = Text(t.AssistanceCode, null)?.ToUpperInvariant(),
     ["natureIds"] = string.Join(",", t.TransactionServices
       .Where(s => s.NatureId.HasValue).Select(s => s.NatureId!.Value).OrderBy(n => n)),
   };

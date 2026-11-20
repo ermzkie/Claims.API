@@ -171,7 +171,7 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
       return QueueActionOutcome.NotFound;
     if (ClaimRules.IsCancelled(claim))
       return QueueActionOutcome.Closed;
-    if (claim.ApprovalStatus == ApprovalStatuses.Waiting)
+    if (claim.ApprovalStatusId == ApprovalStatuses.Waiting)
       return QueueActionOutcome.InApproval;
     if (claim.SocialWorkerUserId is null)
       return QueueActionOutcome.NotServing;
@@ -209,7 +209,7 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
   private const int TvRows = 8;
   private static readonly TimeSpan CallBackShown = TimeSpan.FromMinutes(15);
   // after these a call-back has done its job and leaves the TV
-  private static readonly string[] CallBackDone = [ApprovalService.Printed, ApprovalService.SentForApproval];
+  private static readonly string[] CallBackDone = [ApprovalService.Printed, ApprovalService.Released, ApprovalService.SentForApproval];
 
   /// <summary>What the waiting-area TV shows: codes and desks only.</summary>
   public async Task<NowServingDto> NowServingAsync(CancellationToken ct)
@@ -226,7 +226,7 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
     var callBacks = await db.Transactions.AsNoTracking()
       .Where(ClaimRules.Counted)
       .Where(t => recalledIds.Contains(t.TransactionId)
-        && (t.ApprovalStatus == ApprovalStatuses.Returned || t.ApprovalStatus == ApprovalStatuses.Approved))
+        && (t.ApprovalStatusId == ApprovalStatuses.Returned || t.ApprovalStatusId == ApprovalStatuses.Approved))
       .Include(t => t.LaneType)
       .ToListAsync(ct);
 

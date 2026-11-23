@@ -43,6 +43,7 @@ public class TransactionTests
       date = app.Clock.GetUtcNow().UtcDateTime.AddHours(8),
       laneTypeId,
       patientPersonId,
+      confirmSameDay = true,
     });
 
     Assert.Equal(HttpStatusCode.Created, create.StatusCode);
@@ -53,11 +54,18 @@ public class TransactionTests
     Assert.True(created.Status);
     var transactionId = created.TransactionId;
 
+    await using (var db = app.CreateDbContext())
+    {
+      await db.Database.ExecuteSqlRawAsync("INSERT INTO Assistance (AssistanceID, AssistanceCode, AssistanceType) VALUES (1, 'AICS', 'AICS')");
+    }
+    await worker.PostAsync($"/api/transactions/{transactionId}/checkout-social-worker", null);
+
     var update = await worker.PostAsJsonAsync("/api/transactions/save", new
     {
       transactionId,
       amount = 200m,
       isReleased = true,
+      assistanceCode = "AICS",
     });
     Assert.Equal(HttpStatusCode.NoContent, update.StatusCode);
 
@@ -116,6 +124,7 @@ public class TransactionTests
       date = app.Clock.GetUtcNow().UtcDateTime.AddHours(8).Date,
       laneTypeId,
       patientPersonId,
+      confirmSameDay = true,
       natureIds = new[] { firstNatureId, secondNatureId },
     });
     Assert.Equal(HttpStatusCode.Created, create.StatusCode);
@@ -199,6 +208,7 @@ public class TransactionTests
       date = transactionDate,
       laneTypeId,
       patientPersonId,
+      confirmSameDay = true,
       modeId,
       fundSourceId,
       creditorId,
@@ -291,6 +301,7 @@ public class TransactionTests
     {
       refNo = "QUEUE-1",
       patientPersonId,
+      confirmSameDay = true,
       date = today.AddHours(11),
       laneTypeId = firstLaneId,
     });
@@ -299,6 +310,7 @@ public class TransactionTests
     {
       refNo = "QUEUE-2",
       patientPersonId,
+      confirmSameDay = true,
       date = today.AddHours(12),
       laneTypeId = firstLaneId,
     });
@@ -307,6 +319,7 @@ public class TransactionTests
     {
       refNo = "QUEUE-OTHER-LANE",
       patientPersonId,
+      confirmSameDay = true,
       date = today.AddHours(13),
       laneTypeId = secondLaneId,
     });
@@ -342,6 +355,7 @@ public class TransactionTests
       {
         refNo = "QUEUE-NEXT-DAY",
       patientPersonId,
+      confirmSameDay = true,
         date = today.AddDays(1).AddHours(1),
         laneTypeId = firstLaneId,
       });
@@ -476,9 +490,6 @@ public class TransactionTests
     int forbiddenTransactionId;
     await using (var db = app.CreateDbContext())
     {
-      db.ApprovalStatuses.AddRange(
-        new ApprovalStatus { ApprovalStatusId = 1 },
-        new ApprovalStatus { ApprovalStatusId = 2 });
       var workerTransaction = new Transaction
         { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = existingWorkerId };
       var adminTransaction = new Transaction
@@ -541,9 +552,6 @@ public class TransactionTests
     int workerTransactionId;
     await using (var db = app.CreateDbContext())
     {
-      db.ApprovalStatuses.AddRange(
-        new ApprovalStatus { ApprovalStatusId = 2 },
-        new ApprovalStatus { ApprovalStatusId = 3 });
       var approverTransaction = new Transaction { Status = true, ApprovalStatusId = 2 };
       var adminTransaction = new Transaction { Status = true, ApprovalStatusId = 2 };
       var superAdminTransaction = new Transaction { Status = true, ApprovalStatusId = 2 };
@@ -561,7 +569,7 @@ public class TransactionTests
       $"/api/transactions/{approverTransactionId}/approve", content: null)).StatusCode);
     Assert.Equal(HttpStatusCode.OK, (await admin.PostAsync(
       $"/api/transactions/{adminTransactionId}/approve", content: null)).StatusCode);
-    Assert.Equal(HttpStatusCode.Forbidden, (await superAdmin.PostAsync(
+    Assert.Equal(HttpStatusCode.OK, (await superAdmin.PostAsync(
       $"/api/transactions/{superAdminTransactionId}/approve", content: null)).StatusCode);
     Assert.Equal(HttpStatusCode.Forbidden, (await worker.PostAsync(
       $"/api/transactions/{workerTransactionId}/approve", content: null)).StatusCode);
@@ -581,7 +589,6 @@ public class TransactionTests
 
     var unchangedTransactions = await verify.Transactions
       .Where(transaction =>
-        transaction.TransactionId == superAdminTransactionId ||
         transaction.TransactionId == workerTransactionId)
       .ToListAsync();
     Assert.All(unchangedTransactions, transaction =>
@@ -590,6 +597,60 @@ public class TransactionTests
       Assert.Null(transaction.ApprovedBy);
       Assert.Null(transaction.DateApproved);
     });
+  }
+
+  [Fact]
+  public async Task ReleaseTransaction_RequiresSocialWorkerOrAdminAndSetsReleaseFields()
+  {
+    await using var app = new ClaimsApiFactory();
+    await SeedRolesAsync(app);
+    var workerId = await CreateUserAsync(app, "release-worker", Password, "Social Worker");
+    var adminId = await CreateUserAsync(app, "release-admin", Password, "Administrator");
+    await CreateUserAsync(app, "release-frontliner", Password, "Frontliner");
+    using var worker = await LoginAsAsync(app, "release-worker", Password);
+    using var admin = await LoginAsAsync(app, "release-admin", Password);
+    using var frontliner = await LoginAsAsync(app, "release-frontliner", Password);
+
+    int workerTransactionId;
+    int adminTransactionId;
+    int forbiddenTransactionId;
+    await using (var db = app.CreateDbContext())
+    {
+      var workerTransaction = new Transaction { Status = true, ApprovalStatusId = 1 };
+      var adminTransaction = new Transaction { Status = true, ApprovalStatusId = 1 };
+      var forbiddenTransaction = new Transaction { Status = true, ApprovalStatusId = 1 };
+      db.Transactions.AddRange(workerTransaction, adminTransaction, forbiddenTransaction);
+      await db.SaveChangesAsync();
+      workerTransactionId = workerTransaction.TransactionId;
+      adminTransactionId = adminTransaction.TransactionId;
+      forbiddenTransactionId = forbiddenTransaction.TransactionId;
+    }
+
+    Assert.Equal(HttpStatusCode.OK, (await worker.PostAsync(
+      $"/api/transactions/{workerTransactionId}/release", content: null)).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await admin.PostAsync(
+      $"/api/transactions/{adminTransactionId}/release", content: null)).StatusCode);
+    Assert.Equal(HttpStatusCode.Forbidden, (await frontliner.PostAsync(
+      $"/api/transactions/{forbiddenTransactionId}/release", content: null)).StatusCode);
+
+    await using var verify = app.CreateDbContext();
+    var releasedByWorker = await verify.Transactions
+      .SingleAsync(transaction => transaction.TransactionId == workerTransactionId);
+    Assert.True(releasedByWorker.IsReleased);
+    Assert.Equal(workerId, releasedByWorker.ReleasedBy);
+    Assert.Equal(app.Clock.GetUtcNow().UtcDateTime.AddHours(8), releasedByWorker.DateReleased);
+
+    var releasedByAdmin = await verify.Transactions
+      .SingleAsync(transaction => transaction.TransactionId == adminTransactionId);
+    Assert.True(releasedByAdmin.IsReleased);
+    Assert.Equal(adminId, releasedByAdmin.ReleasedBy);
+    Assert.Equal(app.Clock.GetUtcNow().UtcDateTime.AddHours(8), releasedByAdmin.DateReleased);
+
+    var notReleased = await verify.Transactions
+      .SingleAsync(transaction => transaction.TransactionId == forbiddenTransactionId);
+    Assert.False(notReleased.IsReleased);
+    Assert.Null(notReleased.ReleasedBy);
+    Assert.Null(notReleased.DateReleased);
   }
 
   [Fact]

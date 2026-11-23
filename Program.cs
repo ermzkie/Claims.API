@@ -36,6 +36,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<Claims.API.Services.UserAdminService>();
 builder.Services.AddScoped<Claims.API.Services.PersonService>();
+builder.Services.AddScoped<Claims.API.Services.QueueService>();
 builder.Services.AddClaimsAuthentication(builder.Configuration);
 
 builder.Services.AddExceptionHandler<Claims.API.Infrastructure.GlobalExceptionHandler>();

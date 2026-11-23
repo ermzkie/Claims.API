@@ -26,7 +26,7 @@ public class TransactionsController(
 
   // fields only social workers and admins may change
   private static readonly string[] MoneyFields =
-    ["fundSourceId", "creditorId", "modeId", "amount", "socialWorkerAssessment", "isReleased"];
+    ["fundSourceId", "creditorId", "modeId", "amount", "socialWorkerAssessment", "isReleased", "assistanceCode"];
 
   private bool IsAdmin =>
     currentUser.IsInRole(RoleNames.SuperAdministrator) || currentUser.IsInRole(RoleNames.Administrator);
@@ -235,6 +235,7 @@ public class TransactionsController(
       SocialWorkerAssessment = Text(dto.SocialWorkerAssessment, transaction?.SocialWorkerAssessment),
       Remarks = Text(dto.Remarks, transaction?.Remarks),
       IsReleased = dto.IsReleased ?? transaction?.IsReleased ?? false,
+      AssistanceCode = Text(dto.AssistanceCode, transaction?.AssistanceCode)?.ToUpperInvariant(),
     };
     var natureIds = dto.NatureIds?.Distinct().OrderBy(n => n).ToList()
       ?? transaction?.TransactionServices.Where(s => s.NatureId.HasValue)
@@ -264,13 +265,52 @@ public class TransactionsController(
     {
       return StatusCode(StatusCodes.Status403Forbidden, new
       {
-        message = "Only social workers and admins can set the amount, creditor, fund source, mode, assessment or release.",
+        message = "Only social workers and admins can set the amount, creditor, fund source, mode, assessment, program or release.",
+      });
+    }
+
+    // the worker serving the claim finishes it; admins can always step in
+    if (!isNew && !IsAdmin && transaction!.SocialWorkerUserId != currentUser.Id && changed.Any(k => MoneyFields.Contains(k)))
+    {
+      if (transaction.SocialWorkerUserId is null)
+        return StatusCode(StatusCodes.Status403Forbidden, new { message = "Check out the claim first." });
+      var holder = await context.Users.AsNoTracking()
+        .Where(u => u.UserId == transaction.SocialWorkerUserId)
+        .FirstOrDefaultAsync(cancellationToken);
+      return StatusCode(StatusCodes.Status403Forbidden, new
+      {
+        message = $"{FullName(holder) ?? "Another social worker"} is handling this claim.",
       });
     }
 
     var problem = await ValidateAsync(next, natureIds, transaction, changed, cancellationToken);
     if (problem is not null)
       return BadRequest(new { message = problem });
+
+    if (isNew && !dto.ConfirmSameDay)
+    {
+      var day = next.Date!.Value.Date;
+      var nextDay = day.AddDays(1);
+      var open = await context.Transactions.AsNoTracking()
+        .Where(ClaimRules.Counted)
+        .Where(x => x.PatientPersonId == next.PatientPersonId && x.IsReleased != true && x.Date >= day && x.Date < nextDay)
+        .Include(x => x.LaneType)
+        .Include(x => x.PatientPerson)
+        .OrderByDescending(x => x.TransactionId)
+        .FirstOrDefaultAsync(cancellationToken);
+      if (open is not null)
+      {
+        var code = $"{open.LaneType?.LaneTypeCode}{open.QueueNo}";
+        var name = string.Join(", ", new[] { open.PatientPerson?.LastName, open.PatientPerson?.FirstName }.Where(n => !string.IsNullOrWhiteSpace(n)));
+        return Conflict(new
+        {
+          message = $"{name} is already in today's queue as {code}.",
+          transactionId = open.TransactionId,
+          queueNoCode = code,
+          sameDay = true,
+        });
+      }
+    }
 
     // queue numbers are per day and lane, so a claim moved to another one gets a new number
     var newQueue = isNew
@@ -321,6 +361,7 @@ public class TransactionsController(
     transaction.SocialWorkerAssessment = next.SocialWorkerAssessment;
     transaction.Remarks = next.Remarks;
     transaction.IsReleased = next.IsReleased;
+    transaction.AssistanceCode = next.AssistanceCode;
 
     if (changed.Contains("natureIds"))
     {
@@ -395,9 +436,9 @@ public class TransactionsController(
       }
       if (string.IsNullOrEmpty(reason))
         return BadRequest(new { message = "Give a reason for taking over the claim." });
-      if (reason.Length > MaxReason)
-        return BadRequest(new { message = $"Keep the reason under {MaxReason} characters." });
     }
+    if (reason?.Length > MaxReason)
+      return BadRequest(new { message = $"Keep the reason under {MaxReason} characters." });
 
     var now = Now();
     transaction.SocialWorkerUserId = currentUser.Id;
@@ -405,7 +446,8 @@ public class TransactionsController(
     Log(transaction, previous is null ? "CheckedOut" : "TakenOver",
       previous is null ? null : new Dictionary<string, object?> { ["socialWorkerUserId"] = previous },
       new Dictionary<string, object?> { ["socialWorkerUserId"] = currentUser.Id },
-      previous is null ? null : reason, now);
+      // a plain checkout can carry a note too, e.g. bringing back a client marked not served
+      string.IsNullOrEmpty(reason) ? null : reason, now);
     if (!await TrySaveAsync(cancellationToken))
       return Changed();
     await context.Entry(transaction).Reference(x => x.SocialWorkerUser).LoadAsync(cancellationToken);
@@ -493,6 +535,50 @@ public class TransactionsController(
     return Ok(TransactionResponseMapper.ToResponse(transaction));
   }
 
+  [HttpPost("{id:int}/release")]
+  public async Task<ActionResult<TransactionResponseDto>> ReleaseTransaction(
+    int id,
+    CancellationToken cancellationToken)
+  {
+    if (!CanHandleMoney)
+      return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only social workers and admins can release claims." });
+
+    var transaction = await LoadAsync(id, cancellationToken, tracking: true);
+    if (transaction is null)
+      return NotFound(new { message = "Transaction not found." });
+    if (ClaimRules.IsCancelled(transaction))
+      return Conflict(new { message = "This claim was cancelled." });
+    if (transaction.IsReleased == true)
+      return Conflict(new { message = "This claim is already released." });
+
+    var previousIsReleased = transaction.IsReleased;
+    var previousReleasedBy = transaction.ReleasedBy;
+    var previousDateReleased = transaction.DateReleased;
+    var now = Now();
+    transaction.IsReleased = true;
+    transaction.ReleasedBy = currentUser.Id;
+    transaction.DateReleased = now;
+    Touch(transaction, now);
+    Log(transaction, "Released",
+      new Dictionary<string, object?>
+      {
+        ["isReleased"] = previousIsReleased,
+        ["releasedBy"] = previousReleasedBy,
+        ["dateReleased"] = previousDateReleased,
+      },
+      new Dictionary<string, object?>
+      {
+        ["isReleased"] = transaction.IsReleased,
+        ["releasedBy"] = transaction.ReleasedBy,
+        ["dateReleased"] = transaction.DateReleased,
+      },
+      null, now);
+    if (!await TrySaveAsync(cancellationToken))
+      return Changed();
+
+    return Ok(TransactionResponseMapper.ToResponse(transaction));
+  }
+
   [HttpPost("{id:int}/cancel")]
   public Task<IActionResult> Cancel(int id, ReasonRequest request, CancellationToken cancellationToken) =>
     CancelAsync(id, request.Reason, cancellationToken);
@@ -532,8 +618,8 @@ public class TransactionsController(
 
   private async Task<IActionResult> CancelAsync(int id, string? reason, CancellationToken cancellationToken)
   {
-    if (!IsAdmin)
-      return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only admins can cancel claims." });
+    if (!IsAdmin && !currentUser.IsInRole(RoleNames.Frontliner))
+      return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only frontliners and admins can cancel claims." });
 
     var transaction = await context.Transactions.FirstOrDefaultAsync(x => x.TransactionId == id, cancellationToken);
     if (transaction is null)
@@ -611,8 +697,17 @@ public class TransactionsController(
         return "Amount can only have centavos (2 decimals).";
     }
 
+    if (next.AssistanceCode is not null && Changed("assistanceCode"))
+    {
+      var code = next.AssistanceCode;
+      if (!await context.Assistances.AnyAsync(x => x.AssistanceCode != null && x.AssistanceCode.Trim().ToUpper() == code, ct))
+        return "Program was not found.";
+    }
+
     if (next.IsReleased == true && current?.IsReleased != true && next.Amount is null)
       return "Set the amount before releasing the claim.";
+    if (next.IsReleased == true && current?.IsReleased != true && next.AssistanceCode is null)
+      return "Set the program before releasing the claim.";
 
     if (Changed("natureIds") && natureIds.Count > 0)
     {
@@ -637,6 +732,7 @@ public class TransactionsController(
     ["socialWorkerAssessment"] = Text(t.SocialWorkerAssessment, null),
     ["remarks"] = Text(t.Remarks, null),
     ["isReleased"] = t.IsReleased,
+    ["assistanceCode"] = Text(t.AssistanceCode, null)?.ToUpperInvariant(),
     ["natureIds"] = string.Join(",", t.TransactionServices
       .Where(s => s.NatureId.HasValue).Select(s => s.NatureId!.Value).OrderBy(n => n)),
   };

@@ -177,4 +177,33 @@ public class LookupTests
       Assert.Contains("required", body!["message"]);
     }
   }
+
+  private record FundOption(int Id, string Name, short Year);
+
+  [Fact]
+  public async Task FundSources_ActiveForYearOnly()
+  {
+    var (app, client) = await StartAsync();
+    await using (app)
+    {
+      await using (var db = app.CreateDbContext())
+      {
+        db.SourceOfAssistances.Add(new SourceOfAssistance { SourceId = 1, SourceDesc = " AICS " });
+        db.FundSources.AddRange(
+          new FundSource { FundSourceId = 1, SourceId = 1, Year = 2026, Status = true },
+          new FundSource { FundSourceId = 2, SourceId = 1, Year = 2026, Status = false },
+          new FundSource { FundSourceId = 3, SourceId = 1, Year = 2025, Status = true },
+          new FundSource { FundSourceId = 4, Year = 2026, Status = true });
+        await db.SaveChangesAsync();
+      }
+
+      var options = await client.GetFromJsonAsync<List<FundOption>>("/api/lookups/fund-sources?year=2026");
+      Assert.Equal([1, 4], options!.Select(o => o.Id));
+      Assert.Equal("AICS", options[0].Name);
+      Assert.Equal("Fund source 4", options[1].Name);
+      Assert.Equal((short)2026, options[0].Year);
+
+      Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/lookups/fund-sources")).StatusCode);
+    }
+  }
 }

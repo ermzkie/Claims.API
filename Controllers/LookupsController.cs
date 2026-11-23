@@ -47,6 +47,26 @@ public class LookupsController(ApplicationDbContext context) : ControllerBase
       .Select(x => new LookupItemDto(x.ModeId, null, x.ModeDesc ?? ""))
       .ToListAsync();
 
+  // fund sources page is admins only; social workers need the choices for a claim
+  [HttpGet("fund-sources")]
+  public async Task<ActionResult<List<FundSourceOptionDto>>> FundSources([FromQuery] short? year)
+  {
+    if (year is null)
+      return BadRequest(new { message = "Give the year." });
+
+    var rows = await context.FundSources.AsNoTracking()
+      .Where(x => x.Status && x.Year == year)
+      .OrderBy(x => x.FundSourceId)
+      .Select(x => new { x.FundSourceId, x.Year, Desc = x.Source != null ? x.Source.SourceDesc : null })
+      .ToListAsync();
+    return rows
+      .Select(x => new FundSourceOptionDto(
+        x.FundSourceId,
+        string.IsNullOrWhiteSpace(x.Desc) ? $"Fund source {x.FundSourceId}" : x.Desc.Trim(),
+        x.Year!.Value))
+      .ToList();
+  }
+
   [HttpGet("lane-types")]
   public async Task<ActionResult<List<LookupItemDto>>> LaneTypes() =>
     await context.LaneTypes.AsNoTracking()

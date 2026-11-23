@@ -202,8 +202,8 @@ pages added to `routes.js` are protected automatically.
 | POST                | `/api/users/{id}/reset-password` | Admin / Super Admin | `{ temporaryPassword }`                                                                       |
 | POST                | `/api/users/{id}/deactivate`     | Admin / Super Admin | Turn account off                                                                              |
 | POST                | `/api/users/{id}/activate`       | Admin / Super Admin | Turn account on                                                                               |
-| GET                 | `/api/natureofservice`           | logged in           | List natures of service                                                                       |
-| POST / PUT / DELETE | `/api/natureofservice[/{id}]`    | Admin / Super Admin | `{ natureDesc }`                                                                              |
+| GET                 | `/api/natureofservice`           | logged in           | Active natures `{ natureId, natureDesc, status }`. Admins: `?includeInactive=true` for turned-off ones |
+| POST / PUT / DELETE | `/api/natureofservice[/{id}]`    | Admin / Super Admin | `{ natureDesc, status? }`. PUT without `status` keeps it. Same name = 409. DELETE of a nature claims use = 409 (turn it off instead) |
 | GET                 | `/api/lookups/{list}`            | logged in           | Dropdown values `[{ id, code, name }]`: `sexes`, `civil-statuses`, `name-suffixes`, `relationship-statuses`, `modes-of-assistance`, `sources-of-assistance`, `provinces`, `cities?provinceId=`, `barangays?cityMunicipalityId=` |
 | GET                 | `/api/persons`                   | logged in           | Search, paged: `{ items, total, page, pageSize }`. Query: `search`, `cityMunicipalityId`, `barangayId`, `sexId`, `sector` (repeatable), `page`, `pageSize` (max 100) |
 | GET                 | `/api/persons/{id}`              | logged in           | One person with `family`, `familyOf`, `cityMunicipalityId`, `provinceId` |
@@ -221,6 +221,11 @@ pages added to `routes.js` are protected automatically.
 | GET                 | `/api/transactions/{id}/history` | logged in           | Change log, oldest first |
 | POST                | `/api/transactions/save`         | logged in           | Create (201) or edit (204, with `transactionId`). On edit, fields left out keep their value; blank text clears it. Money side is Social Worker / admins |
 | POST                | `/api/transactions/{id}/checkout-social-worker` | Social Worker / admins | Take the claim. Someone else has it: 409 with their name; send `{ takeOver: true, reason }` to take it over |
+| GET                 | `/api/queue/today`               | logged in           | Today's queue: `{ day, serverTime, nextQueueCode, lanes: [{ laneTypeId, code, name, waiting: [], serving: [], done }], notServed: [], waiting, serving, done }`. Lanes come in serving order |
+| POST                | `/api/queue/next`                | Social Worker / admins | Take the next client: 200 with the claim, 204 when nobody waits, 409 `{ message, transactionId }` while you still serve one |
+| POST                | `/api/queue/{id}/return`         | holder / admins     | Back to the queue, behind those waiting now. Body `{ reason? }` (204) |
+| POST                | `/api/queue/{id}/not-served`     | holder / admins     | Out of today's queue. Body `{ reason }` required (204). A checkout brings it back |
+| GET                 | `/api/lookups/fund-sources?year=` | logged in           | Active fund sources for that year `[{ id, name, year }]` |
 | POST                | `/api/transactions/{id}/cancel`  | Admin / Super Admin | Cancel (204): `{ reason }` required. `DELETE /api/transactions/{id}?reason=` does the same |
 | POST                | `/api/transactions/{id}/restore` | Admin / Super Admin | Undo a cancel (204), optional `{ reason }` |
 | GET                 | `/api/dashboard`                 | logged in           | Home page figures for one month. Query: `year`, `month` (default this month)                  |
@@ -287,6 +292,23 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 - Send dates as picked (`2026-11-17T09:00`). UTC (`...Z`) is turned into PH time.
 - Cancelled claims are hidden from lists and totals, and can't be edited.
 - Every change goes to AuditLog (`Transaction`).
+- A new claim for someone already open in that day's queue (not released, not cancelled) is 409
+  `{ message, transactionId, queueNoCode, sameDay: true }`. Send `confirmSameDay: true` for a real second visit.
+- `assistanceCode` (program) is a code from `/api/lookups/assistance-programs`, Social Worker / admins only.
+  Releasing needs it, like the amount.
+- Money fields, program and release: only the social worker holding the claim, or an admin (403 otherwise:
+  "Check out the claim first." or "{name} is handling this claim.").
+
+### Things to know about the queue
+
+- Today only (PH date), cancelled claims never show. Lanes are served Senior/PWD (S), then VIP (V), then
+  Regular (R): a lane waits until the ones before it are empty.
+- Waiting = no social worker, not released. Being served = has one. Done = released. Not served = marked so
+  with a reason.
+- One open client per worker: release it, return it or mark it not served before taking the next.
+- A returned client lines up again from when they were returned: behind those already waiting, ahead of
+  anyone who arrives later. They keep their number.
+- A client marked not served comes back with a checkout; send `{ reason }` and it is logged.
 
 ### Things to know about reports
 

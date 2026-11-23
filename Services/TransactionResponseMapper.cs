@@ -42,6 +42,8 @@ internal static class TransactionResponseMapper
       SocialWorkerUserFullName = UserName(transaction.SocialWorkerUser),
       SocialWorkerAssessment = transaction.SocialWorkerAssessment,
       Remarks = transaction.Remarks,
+      EndorsedBy = transaction.EndorsedBy,
+      EndorsementReason = transaction.EndorsementReason,
       IsReleased = transaction.IsReleased,
       Status = transaction.Status,
       CreatedBy = transaction.CreatedBy,

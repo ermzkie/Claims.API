@@ -109,6 +109,25 @@ public class QueueTests
   }
 
   [Fact]
+  public async Task Today_ShowsOffLaneOnlyWhenItHasClaims()
+  {
+    await using var o = await SetupAsync();
+    await FileAsync(o, o.S);
+    await FileAsync(o, o.R);
+    await using (var db = o.App.CreateDbContext())
+    {
+      // S has a client waiting today, V has none
+      foreach (var lane in db.LaneTypes.Where(l => l.LaneTypeId == o.S || l.LaneTypeId == o.V))
+        lane.Status = false;
+      await db.SaveChangesAsync();
+    }
+
+    var q = await TodayAsync(o.Front);
+
+    Assert.Equal(["S", "R"], q.Lanes.Select(l => l.Code));
+  }
+
+  [Fact]
   public async Task Today_ShowsServingWithWorkerName()
   {
     await using var o = await SetupAsync();

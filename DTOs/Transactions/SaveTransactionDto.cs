@@ -18,6 +18,9 @@ public class SaveTransactionDto
   public int? SocialWorkerUserId { get; set; }
   public string? SocialWorkerAssessment { get; set; }
   public string? Remarks { get; set; }
+  // needed when the claim's lane needs an endorsement
+  public string? EndorsedBy { get; set; }
+  public string? EndorsementReason { get; set; }
   public bool? IsReleased { get; set; }
   // program code from /api/lookups/assistance-programs
   public string? AssistanceCode { get; set; }

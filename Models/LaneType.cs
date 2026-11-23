@@ -21,7 +21,8 @@ public partial class LaneType
     [Unicode(false)]
     public string? LaneTypeDesc { get; set; }
 
-    public bool Status { get; set; }
+    // matches the column default, so a lane made in code starts on
+    public bool Status { get; set; } = true;
 
     public bool NeedsEndorsement { get; set; }
 

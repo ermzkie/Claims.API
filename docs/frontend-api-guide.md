@@ -331,6 +331,11 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
   fields or release.
 - Queue: a claim sent for approval or returned is out of the serving list, so the worker can take the next client.
   Approved claims count as done. Return / not served on them is 409.
+- Picking a lane (new claim or lane change): a lane that is turned off is refused (400 `That lane is turned off.`).
+  A lane with `needsEndorsement` needs `endorsedBy` (max 150) and `endorsementReason` (max 300), both saved on the
+  claim and in its history. Claims already in a lane keep saving after the lane changes.
+- `GET /api/lookups/lane-types` lists only lanes that are on: `[{ id, code, name, needsEndorsement }]`. The queue
+  still shows a turned-off lane while it has claims that day.
 - `clearRepresentative: true` removes the representative (the linked person and the old free-text one).
   The client can be their own representative (the intake sheet's "same as the patient").
 - `assistanceCode` (program) is a code from `/api/lookups/assistance-programs`, Social Worker / admins only.

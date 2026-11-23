@@ -68,10 +68,11 @@ public class LookupsController(ApplicationDbContext context) : ControllerBase
   }
 
   [HttpGet("lane-types")]
-  public async Task<ActionResult<List<LookupItemDto>>> LaneTypes() =>
+  public async Task<ActionResult<List<LaneLookupDto>>> LaneTypes() =>
     await context.LaneTypes.AsNoTracking()
+      .Where(x => x.Status)
       .OrderBy(x => x.LaneTypeId)
-      .Select(x => new LookupItemDto(x.LaneTypeId, x.LaneTypeCode, x.LaneTypeDesc ?? ""))
+      .Select(x => new LaneLookupDto(x.LaneTypeId, x.LaneTypeCode, x.LaneTypeDesc ?? "", x.NeedsEndorsement))
       .ToListAsync();
 
   [HttpGet("sources-of-assistance")]

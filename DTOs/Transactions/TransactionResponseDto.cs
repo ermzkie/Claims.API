@@ -26,6 +26,8 @@ public class TransactionResponseDto
   public string? SocialWorkerUserFullName { get; set; }
   public string? SocialWorkerAssessment { get; set; }
   public string? Remarks { get; set; }
+  public string? EndorsedBy { get; set; }
+  public string? EndorsementReason { get; set; }
   public bool? IsReleased { get; set; }
   public bool? Status { get; set; }
   public int? CreatedBy { get; set; }

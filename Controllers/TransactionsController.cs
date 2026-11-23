@@ -366,6 +366,8 @@ public class TransactionsController(
       Representative = dto.ClearRepresentative ? null : transaction?.Representative,
       SocialWorkerAssessment = Text(dto.SocialWorkerAssessment, transaction?.SocialWorkerAssessment),
       Remarks = Text(dto.Remarks, transaction?.Remarks),
+      EndorsedBy = Text(dto.EndorsedBy, transaction?.EndorsedBy),
+      EndorsementReason = Text(dto.EndorsementReason, transaction?.EndorsementReason),
       IsReleased = dto.IsReleased ?? transaction?.IsReleased ?? false,
       AssistanceCode = Text(dto.AssistanceCode, transaction?.AssistanceCode)?.ToUpperInvariant(),
     };
@@ -504,6 +506,8 @@ public class TransactionsController(
     transaction.Representative = next.Representative;
     transaction.SocialWorkerAssessment = next.SocialWorkerAssessment;
     transaction.Remarks = next.Remarks;
+    transaction.EndorsedBy = next.EndorsedBy;
+    transaction.EndorsementReason = next.EndorsementReason;
     transaction.IsReleased = next.IsReleased;
     transaction.AssistanceCode = next.AssistanceCode;
     // a reopened claim goes through approval again
@@ -966,8 +970,21 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
 
     if (next.LaneTypeId is null)
       return "Lane type is required.";
-    if (Changed("laneTypeId") && !await context.LaneTypes.AnyAsync(x => x.LaneTypeId == next.LaneTypeId, ct))
-      return "Lane type was not found.";
+    if (Changed("laneTypeId"))
+    {
+      // only checked when the lane is picked, so older claims keep saving
+      var lane = await context.LaneTypes.AsNoTracking().FirstOrDefaultAsync(x => x.LaneTypeId == next.LaneTypeId, ct);
+      if (lane is null)
+        return "Lane type was not found.";
+      if (!lane.Status)
+        return "That lane is turned off.";
+      if (lane.NeedsEndorsement && (next.EndorsedBy is null || next.EndorsementReason is null))
+        return $"{lane.LaneTypeDesc?.Trim()} needs who endorsed the client and why. Add them from the Front desk.";
+    }
+    if (next.EndorsedBy?.Length > 150)
+      return "Endorsed by can be at most 150 characters.";
+    if (next.EndorsementReason?.Length > 300)
+      return "The endorsement reason can be at most 300 characters.";
 
     if (next.Date is null)
       return "Date is required to assign a queue number.";
@@ -1040,6 +1057,8 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
     ["amount"] = allocation?.Amount,
     ["socialWorkerAssessment"] = Text(t.SocialWorkerAssessment, null),
     ["remarks"] = Text(t.Remarks, null),
+    ["endorsedBy"] = Text(t.EndorsedBy, null),
+    ["endorsementReason"] = Text(t.EndorsementReason, null),
     ["isReleased"] = t.IsReleased,
     ["assistanceCode"] = Text(t.AssistanceCode, null)?.ToUpperInvariant(),
     ["natureIds"] = string.Join(",", t.TransactionServices

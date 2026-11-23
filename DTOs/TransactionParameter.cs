@@ -20,4 +20,8 @@ public class TransactionQueryParameters
   // Sorting
   public string SortBy { get; set; } = "Date";
   public string SortDirection { get; set; } = "desc";
+
+
+  //FOR TABLE FILTER TRANSACTIONS 
+  public string? Tab {get; set;}
 }

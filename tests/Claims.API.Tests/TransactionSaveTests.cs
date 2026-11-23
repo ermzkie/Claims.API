@@ -186,9 +186,10 @@ public class TransactionSaveTests
     Assert.Equal(HttpStatusCode.Forbidden, (await Save(o.Front, new { transactionId = id, amount = 5000m })).StatusCode);
     Assert.Equal(HttpStatusCode.Forbidden, (await Save(o.Front, new { transactionId = id, creditorId = o.CreditorId })).StatusCode);
     Assert.Equal(HttpStatusCode.Forbidden, (await Save(o.Front, new { transactionId = id, isReleased = true })).StatusCode);
-    // a filed claim belongs to the social worker now
-    Assert.Equal(HttpStatusCode.Forbidden, (await Save(o.Front, new { transactionId = id, remarks = "walk-in" })).StatusCode);
+    // the desk can fix a waiting claim, not once a social worker has it
+    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Front, new { transactionId = id, remarks = "walk-in" })).StatusCode);
     await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
+    Assert.Equal(HttpStatusCode.Forbidden, (await Save(o.Front, new { transactionId = id, remarks = "walk-in again" })).StatusCode);
     Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, amount = 5000m })).StatusCode);
   }
 

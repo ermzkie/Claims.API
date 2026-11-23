@@ -286,7 +286,8 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 - Claims (list, details, history), dashboard, creditor totals and claims, reports and a person's claims:
   Social Worker and admins only. Frontliners get 403.
 - Creditor claims CSV export and the removed creditors list: admins only.
-- Frontliners file new claims; changing a filed claim is for social workers and admins (403).
+- Frontliners file new claims and can fix one until a social worker picks it up (403 after that).
+  The money side stays social workers and admins only.
 - A frontliner (without other roles) edits person basics only: changing civil status, occupation or income,
   or any family link, is 403. Resending the same values is fine.
 

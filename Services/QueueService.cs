@@ -18,7 +18,7 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
   public const string Recalled = "Recalled";
   private static readonly string[] QueueActions = [CheckedOut, TakenOver, ReturnedToQueue, NotServed];
 
-  // seniors/PWD first, then VIP, then regular
+  // seniors/PWD first, then endorsed cases, then regular
   private static readonly string[] LaneOrder = ["S", "V", "R"];
 
   // office time with no zone, like the dates stored on claims

@@ -347,7 +347,7 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 
 ### Things to know about the queue
 
-- Today only (PH date), cancelled claims never show. Lanes are served Senior/PWD (S), then VIP (V), then
+- Today only (PH date), cancelled claims never show. Lanes are served Senior/PWD (S), then endorsed cases (V), then
   Regular (R): a lane waits until the ones before it are empty.
 - Waiting = no social worker, not released. Being served = has one. Done = released. Not served = marked so
   with a reason.

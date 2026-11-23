@@ -16,7 +16,7 @@ public class ReportsTests
   {
     var app = new ClaimsApiFactory();
     await SeedRolesAsync(app);
-    var userId = await CreateUserAsync(app, "front", Password, "Frontliner");
+    var userId = await CreateUserAsync(app, "front", Password, "Social Worker");
     await using var db = app.CreateDbContext();
     var person = new Person { FirstName = "MARIA", LastName = "SANTOS", Status = true };
     db.People.Add(person);

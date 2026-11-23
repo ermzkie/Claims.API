@@ -17,7 +17,7 @@ public class CreditorClaimsBrowserTests
   {
     var app = new ClaimsApiFactory();
     await SeedRolesAsync(app);
-    await CreateUserAsync(app, "fl", Pw, "Frontliner");
+    await CreateUserAsync(app, "fl", Pw, "Social Worker");
     await using (var db = app.CreateDbContext())
     {
       db.Users.AddRange(

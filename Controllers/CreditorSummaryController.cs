@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Authorization;
+using Claims.API.Auth;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -10,6 +12,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Claims.API.Controllers;
 
 // old-system claims (no CreatedBy) came over with Status false, so it doesn't mean deleted for them
+[Authorize(Policy = AuthPolicies.ClaimsViewer)]
 [Route("api/creditor")]
 [ApiController]
 public class CreditorSummaryController(ApplicationDbContext context) : ControllerBase
@@ -137,6 +140,7 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
   }
 
   [HttpGet("{id:int}/claims/export")]
+  [Authorize(Policy = AuthPolicies.UserAdmin)]
   public async Task<IActionResult> Export(int id, [FromQuery] ClaimFilter filter)
   {
     var (query, error) = await FilteredClaimsAsync(id, filter);

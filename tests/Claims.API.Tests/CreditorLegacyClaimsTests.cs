@@ -15,7 +15,7 @@ public class CreditorLegacyClaimsTests
   {
     var app = new ClaimsApiFactory();
     await SeedRolesAsync(app);
-    var userId = await CreateUserAsync(app, "fl", Pw, "Frontliner");
+    var userId = await CreateUserAsync(app, "fl", Pw, "Social Worker");
     await using (var db = app.CreateDbContext())
     {
       db.Creditors.Add(new Creditor { CreditorId = 1, CreditorName = "HOSPITAL A", Status = true });

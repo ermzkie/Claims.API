@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using System.Data;
 using System.Text.Json;
 using Claims.API.Auth;
@@ -38,6 +39,7 @@ public class TransactionsController(
   private DateTime Now() => time.GetUtcNow().UtcDateTime.AddHours(8);
 
   [HttpGet("current-social-worker")]
+  [Authorize(Policy = AuthPolicies.ClaimsViewer)]
   public async Task<ActionResult<List<TransactionResponseDto>>> GetAllCurrentTransactionsOfSocialWorker(
     CancellationToken cancellationToken)
   {
@@ -108,6 +110,7 @@ public class TransactionsController(
   }
 
   [HttpGet]
+  [Authorize(Policy = AuthPolicies.ClaimsViewer)]
   public async Task<ActionResult<PagedResult<TransactionResponseDto>>> GetAll(
           [FromQuery] TransactionQueryParameters parameters)
   {
@@ -280,6 +283,7 @@ public class TransactionsController(
   }
 
   [HttpGet("{id:int}")]
+  [Authorize(Policy = AuthPolicies.ClaimsViewer)]
   public async Task<ActionResult<TransactionResponseDto>> GetById(int id)
   {
     var transaction = await LoadAsync(id, CancellationToken.None);
@@ -290,6 +294,7 @@ public class TransactionsController(
   }
 
   [HttpGet("{id:int}/history")]
+  [Authorize(Policy = AuthPolicies.ClaimsViewer)]
   public async Task<ActionResult<List<TransactionHistoryDto>>> History(int id, CancellationToken cancellationToken)
   {
     if (!await context.Transactions.AnyAsync(x => x.TransactionId == id, cancellationToken))
@@ -321,6 +326,9 @@ public class TransactionsController(
       return NotFound(new { message = "Transaction not found." });
 
     var isNew = transaction is null;
+    // the desk can still fix a claim nobody has picked up; after that it's the social worker's
+    if (!isNew && !CanHandleMoney && transaction!.SocialWorkerUserId is not null)
+      return StatusCode(StatusCodes.Status403Forbidden, new { message = "A social worker has this claim now. Ask them to change it." });
     if (transaction is not null && ClaimRules.IsCancelled(transaction))
       return Conflict(new { message = "This claim was cancelled. An admin can restore it." });
 

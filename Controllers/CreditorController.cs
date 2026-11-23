@@ -23,6 +23,7 @@ public class CreditorController : ControllerBase
 
   // GET: api/Creditor
   [HttpGet]
+  [Authorize(Policy = AuthPolicies.ClaimsViewer)]
   public async Task<ActionResult<IEnumerable<CreditorResponseDto>>> GetAll()
   {
     var records = await _context.Creditors
@@ -40,6 +41,7 @@ public class CreditorController : ControllerBase
 
   // GET: api/Creditor/1
   [HttpGet("{id}")]
+  [Authorize(Policy = AuthPolicies.ClaimsViewer)]
   public async Task<ActionResult<CreditorResponseDto>> GetById(int id)
   {
     var record = await _context.Creditors

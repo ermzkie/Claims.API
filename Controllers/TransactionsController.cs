@@ -27,8 +27,8 @@ public class TransactionsController(
 
   // fields only social workers and admins may change
   private static readonly string[] MoneyFields =
-    // ["fundSourceId", "creditorId", "modeId", "amount", "socialWorkerAssessment", "isReleased", "assistanceCode"];
-    ["fundSourceId", "creditorId", "modeId", "amount", "socialWorkerAssessment", "assistanceCode"];
+    ["fundSourceId", "creditorId", "modeId", "amount", "socialWorkerAssessment", "isReleased", "assistanceCode"];
+    // ["fundSourceId", "creditorId", "modeId", "amount", "socialWorkerAssessment", "assistanceCode"];
 
   private bool IsAdmin =>
     currentUser.IsInRole(RoleNames.SuperAdministrator) || currentUser.IsInRole(RoleNames.Administrator);

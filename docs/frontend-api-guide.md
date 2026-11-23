@@ -306,8 +306,8 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
   `{ message, transactionId, queueNoCode, sameDay: true }`. Send `confirmSameDay: true` for a real second visit.
 - Releasing needs the client's birthdate (exact, or estimated from an approximate age: `birthdateEstimated` on the
   person), every claim, old ones too.
-- `clearRepresentative: true` removes the representative (the linked person and the old free-text one). The
-  representative can't be the client.
+- `clearRepresentative: true` removes the representative (the linked person and the old free-text one).
+  The client can be their own representative (the intake sheet's "same as the patient").
 - `assistanceCode` (program) is a code from `/api/lookups/assistance-programs`, Social Worker / admins only.
   Releasing needs it, like the amount.
 - Money fields, program and release: only the social worker holding the claim, or an admin (403 otherwise:

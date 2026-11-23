@@ -652,13 +652,14 @@ public class TransactionSaveTests
   }
 
   [Fact]
-  public async Task Representative_CannotBeTheClient()
+  public async Task Representative_CanBeTheClient()
   {
+    // the intake sheet's "same as the patient" saves it this way
     await using var o = await SetupAsync();
     var id = await CreateAsync(o);
     await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
-    var r = await Save(o.Worker, new { transactionId = id, representativePersonId = o.PatientId });
-    Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
-    Assert.Contains("The representative can't be the client.", await r.Content.ReadAsStringAsync());
+    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, representativePersonId = o.PatientId })).StatusCode);
+    var claim = await o.Worker.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{id}");
+    Assert.Equal(o.PatientId, claim!.RepresentativePersonId);
   }
 }

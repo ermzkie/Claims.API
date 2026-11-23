@@ -676,9 +676,6 @@ public class TransactionsController(
       return "Patient is required.";
     if (Changed("patientPersonId") && !await context.People.AnyAsync(x => x.PersonId == next.PatientPersonId && x.Status, ct))
       return "Patient was not found.";
-    if (next.RepresentativePersonId is not null && next.RepresentativePersonId == next.PatientPersonId
-        && (Changed("representativePersonId") || Changed("patientPersonId")))
-      return "The representative can't be the client.";
     if (next.RepresentativePersonId is not null && Changed("representativePersonId")
         && !await context.People.AnyAsync(x => x.PersonId == next.RepresentativePersonId && x.Status, ct))
       return "Representative was not found.";

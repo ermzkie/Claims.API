@@ -188,6 +188,41 @@ public class TransactionSaveTests
   }
 
   [Fact]
+  public async Task Endorsement_CantBeClearedOnAnEndorsedLane()
+  {
+    await using var o = await SetupAsync();
+    var v = await AddLaneAsync(o, "V", "Endorsed Cases Lane", needsEndorsement: true);
+    var r = await Save(o.Front, NewClaim(o, v, "Office of the Governor", "Surgery tomorrow"));
+    var id = (await r.Content.ReadFromJsonAsync<TransactionResponseDto>())!.TransactionId;
+
+    var cleared = await Save(o.Front, new { transactionId = id, endorsedBy = "" });
+    Assert.Equal(HttpStatusCode.BadRequest, cleared.StatusCode);
+    // fixing the wording is still fine
+    Assert.Equal(HttpStatusCode.NoContent,
+      (await Save(o.Front, new { transactionId = id, endorsementReason = "Surgery tomorrow morning" })).StatusCode);
+  }
+
+  [Fact]
+  public async Task Endorsement_LockedOnceASocialWorkerHasTheClaim()
+  {
+    await using var o = await SetupAsync();
+    var v = await AddLaneAsync(o, "V", "Endorsed Cases Lane", needsEndorsement: true);
+    var r = await Save(o.Front, NewClaim(o, v, "Office of the Governor", "Surgery tomorrow"));
+    var id = (await r.Content.ReadFromJsonAsync<TransactionResponseDto>())!.TransactionId;
+    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
+
+    Assert.Equal(HttpStatusCode.Forbidden,
+      (await Save(o.Worker, new { transactionId = id, endorsedBy = "Someone else" })).StatusCode);
+    Assert.Equal(HttpStatusCode.Forbidden,
+      (await Save(o.Worker2, new { transactionId = id, endorsementReason = "Changed" })).StatusCode);
+    // the worker can still do the rest of the claim
+    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, remarks = "seen" })).StatusCode);
+    // an admin can correct it
+    Assert.Equal(HttpStatusCode.NoContent,
+      (await Save(o.Admin, new { transactionId = id, endorsedBy = "Office of the Vice Governor" })).StatusCode);
+  }
+
+  [Fact]
   public async Task TurnedOffLane_RefusesNewClaims_ButOldOnesSave()
   {
     await using var o = await SetupAsync();

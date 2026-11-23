@@ -393,6 +393,14 @@ public class TransactionsController(
     if (!isNew && changed.Count == 0)
       return NoContent();
 
+    // the endorsement explains why the client skipped the line, so the worker serving them can't rewrite it
+    if (!isNew && !IsAdmin && transaction!.SocialWorkerUserId is not null
+        && changed.Any(k => k is "endorsedBy" or "endorsementReason"))
+      return StatusCode(StatusCodes.Status403Forbidden, new
+      {
+        message = "The endorsement can't change once a social worker has the claim. Ask an admin to correct it.",
+      });
+
     if (wasReleased)
     {
       if (!IsAdmin)
@@ -970,13 +978,13 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
 
     if (next.LaneTypeId is null)
       return "Lane type is required.";
-    if (Changed("laneTypeId"))
+    // only checked when the lane or the endorsement changes, so older claims keep saving
+    if (Changed("laneTypeId") || Changed("endorsedBy") || Changed("endorsementReason"))
     {
-      // only checked when the lane is picked, so older claims keep saving
       var lane = await context.LaneTypes.AsNoTracking().FirstOrDefaultAsync(x => x.LaneTypeId == next.LaneTypeId, ct);
       if (lane is null)
         return "Lane type was not found.";
-      if (!lane.Status)
+      if (!lane.Status && Changed("laneTypeId"))
         return "That lane is turned off.";
       if (lane.NeedsEndorsement && (next.EndorsedBy is null || next.EndorsementReason is null))
         return $"{lane.LaneTypeDesc?.Trim()} needs who endorsed the client and why. Add them from the Front desk.";

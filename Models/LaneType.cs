@@ -21,6 +21,10 @@ public partial class LaneType
     [Unicode(false)]
     public string? LaneTypeDesc { get; set; }
 
+    public bool Status { get; set; }
+
+    public bool NeedsEndorsement { get; set; }
+
     [InverseProperty("LaneType")]
     public virtual ICollection<Transaction> Transactions { get; set; } = new List<Transaction>();
 }

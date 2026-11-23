@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Claims.API.Auth;
 using Claims.API.Data;
 using Claims.API.DTOs.ReferenceData;
 using Claims.API.Models;
@@ -16,8 +18,10 @@ public enum ListOutcome
 public record ListResult(ListOutcome Outcome, string? Message = null, ListItemDto? Item = null);
 
 // most of these tables have no status column, so values are renamed or deleted when unused
-public class ReferenceDataService(ApplicationDbContext db)
+public class ReferenceDataService(ApplicationDbContext db, ICurrentUser currentUser, TimeProvider time)
 {
+  private static readonly JsonSerializerOptions LogJson = new(JsonSerializerDefaults.Web);
+
   private const int MaxText = 50;
   public const string LockedLane =
     "The S, V and R lanes are used by the queue order and can't be renamed to another code or deleted.";
@@ -27,6 +31,8 @@ public class ReferenceDataService(ApplicationDbContext db)
   private interface ILookup
   {
     ListInfoDto Info { get; }
+    // set for lists whose changes go to the AuditLog
+    string? AuditEntity { get; }
     Task<bool> NameTakenAsync(ApplicationDbContext db, string candidate, int? exceptId);
     Task<bool> CodeTakenAsync(ApplicationDbContext db, string candidate, int? exceptId);
     (string? Code, string? Error) CheckCode(string? code);
@@ -60,9 +66,12 @@ public class ReferenceDataService(ApplicationDbContext db)
     Groups<T>? groups = null,
     Flags<T>? flags = null,
     Func<T, bool>? locked = null,
-    Func<string?, (string? Code, string? Error)>? codeRule = null) : ILookup where T : class, new()
+    Func<string?, (string? Code, string? Error)>? codeRule = null,
+    string? auditEntity = null) : ILookup where T : class, new()
   {
     public ListInfoDto Info { get; } = new(key, title, hasCode, groups?.Choices, flags?.Defs);
+
+    public string? AuditEntity => auditEntity;
 
     public bool UniqueCode => codeRule is not null;
 
@@ -185,7 +194,9 @@ public class ReferenceDataService(ApplicationDbContext db)
         return value is { Length: >= 1 and <= 3 } && value.All(char.IsAsciiLetterUpper)
           ? (value, null)
           : (null, "Lane code is 1 to 3 letters.");
-      }),
+      },
+      // turning the endorsement off and on again has to leave a trail
+      auditEntity: "LaneType"),
   ];
 
   private static ILookup? Find(string key) => Lookups.FirstOrDefault(l => l.Info.Key == key);
@@ -202,7 +213,13 @@ public class ReferenceDataService(ApplicationDbContext db)
       return new ListResult(ListOutcome.NotFound, "List not found.");
     }
     var (error, code, name, group) = await ValidateAsync(list, dto, exceptId: null);
-    return error ?? new ListResult(ListOutcome.Ok, Item: await list.AddAsync(db, code, name!, group, dto.Flags));
+    if (error is not null)
+    {
+      return error;
+    }
+    var added = await list.AddAsync(db, code, name!, group, dto.Flags);
+    await LogAsync(list, added.Id, "Created", null, added);
+    return new ListResult(ListOutcome.Ok, Item: added);
   }
 
   public async Task<ListResult> UpdateAsync(string key, int id, SaveListItemDto dto)
@@ -216,7 +233,13 @@ public class ReferenceDataService(ApplicationDbContext db)
     {
       return new ListResult(ListOutcome.Invalid, LockedLane);
     }
-    return error ?? new ListResult(ListOutcome.Ok, Item: await list.UpdateAsync(db, id, code, name!, group, dto.Flags));
+    if (error is not null)
+    {
+      return error;
+    }
+    var saved = await list.UpdateAsync(db, id, code, name!, group, dto.Flags);
+    await LogAsync(list, id, "Updated", current, saved);
+    return new ListResult(ListOutcome.Ok, Item: saved);
   }
 
   public async Task<ListResult> DeleteAsync(string key, int id)
@@ -235,6 +258,7 @@ public class ReferenceDataService(ApplicationDbContext db)
       return new ListResult(ListOutcome.Conflict, $"Can't delete \"{item.Name}\": {records} it. You can rename it instead.");
     }
     await list.DeleteAsync(db, id);
+    await LogAsync(list, id, "Deleted", item, null);
     return new ListResult(ListOutcome.Ok);
   }
 
@@ -271,6 +295,34 @@ public class ReferenceDataService(ApplicationDbContext db)
     return await list.NameTakenAsync(db, name, exceptId)
       ? (new ListResult(ListOutcome.Conflict, "That value is already in the list."), null, null, null)
       : (null, code, name, group);
+  }
+
+  private static object? Values(ListItemDto? item) =>
+    item is null ? null : new { item.Code, item.Name, item.Group, item.Flags };
+
+  private async Task LogAsync(ILookup list, int id, string action, ListItemDto? before, ListItemDto? after)
+  {
+    if (list.AuditEntity is null)
+    {
+      return;
+    }
+    var oldValues = before is null ? null : JsonSerializer.Serialize(Values(before), LogJson);
+    var newValues = after is null ? null : JsonSerializer.Serialize(Values(after), LogJson);
+    if (oldValues == newValues)
+    {
+      return;
+    }
+    db.AuditLogs.Add(new AuditLog
+    {
+      Entity = list.AuditEntity,
+      EntityId = id,
+      Action = action,
+      OldValues = oldValues,
+      NewValues = newValues,
+      UserId = currentUser.Id,
+      DateCreated = time.GetUtcNow().UtcDateTime.AddHours(8),
+    });
+    await db.SaveChangesAsync();
   }
 
   private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

@@ -164,6 +164,44 @@ public class ReferenceDataTests
   }
 
   [Fact]
+  public async Task Lanes_ChangesGoToTheHistory()
+  {
+    var (app, admin) = await StartAsync();
+    await using (app)
+    {
+      var ids = await SeedLanesAsync(app);
+      // endorsement switched off, then back on
+      await admin.PutAsJsonAsync($"/api/reference-data/lanes/{ids["V"]}",
+        new { code = "V", name = "Endorsed Cases Lane", flags = new { needsEndorsement = false } });
+      await admin.PutAsJsonAsync($"/api/reference-data/lanes/{ids["V"]}",
+        new { code = "V", name = "Endorsed Cases Lane", flags = new { needsEndorsement = true } });
+      // saving with nothing changed adds nothing
+      await admin.PutAsJsonAsync($"/api/reference-data/lanes/{ids["V"]}",
+        new { code = "V", name = "Endorsed Cases Lane" });
+      var added = await admin.PostAsJsonAsync("/api/reference-data/lanes", new { code = "EW", name = "Emergency" });
+      var ewId = (await added.Content.ReadFromJsonAsync<Item>())!.Id;
+      await admin.DeleteAsync($"/api/reference-data/lanes/{ewId}");
+      // other lists don't log
+      await admin.PostAsJsonAsync("/api/reference-data/civil-statuses", new { code = "W", name = "Widowed" });
+
+      await using var db = app.CreateDbContext();
+      var adminId = await db.Users.Where(u => u.Username == "admin").Select(u => u.UserId).SingleAsync();
+      var logs = await db.AuditLogs.OrderBy(l => l.AuditLogId).ToListAsync();
+      Assert.All(logs, l => Assert.Equal("LaneType", l.Entity));
+      Assert.Equal(["Updated", "Updated", "Created", "Deleted"], logs.Select(l => l.Action));
+      Assert.Equal(ids["V"], logs[0].EntityId);
+      Assert.Contains("\"needsEndorsement\":true", logs[0].OldValues);
+      Assert.Contains("\"needsEndorsement\":false", logs[0].NewValues);
+      Assert.Contains("\"needsEndorsement\":true", logs[1].NewValues);
+      Assert.Contains("Emergency", logs[2].NewValues);
+      Assert.Null(logs[2].OldValues);
+      Assert.Equal(ewId, logs[3].EntityId);
+      Assert.Contains("Emergency", logs[3].OldValues);
+      Assert.All(logs, l => Assert.Equal(adminId, l.UserId));
+    }
+  }
+
+  [Fact]
   public async Task Lanes_LockedCantBeDeleted()
   {
     var (app, admin) = await StartAsync();

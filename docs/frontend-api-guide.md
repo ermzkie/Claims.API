@@ -390,6 +390,7 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 - A list can carry `flags` (`[{ key, label }]`); its values then have `flags: { key: bool }`. A flag left out keeps its value.
 - `lanes`: flags `active` (on at the front desk) and `needsEndorsement`. Codes are 1 to 3 letters, saved uppercase, unique.
   S, V and R come back `locked: true`: their code can't change and they can't be deleted (the queue order uses them).
+  Every lane change goes to AuditLog (`LaneType`: Created, Updated with before/after, Deleted), with who and when.
 - Any value used by records can't be deleted (409); rename it instead.
 
 ## Rules

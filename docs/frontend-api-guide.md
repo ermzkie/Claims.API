@@ -376,6 +376,15 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 - `review.keepPersonId` is the record the others will be merged into.
 - `personIds` must be the whole current group. A group comes back if someone new joins it.
 
+### Things to know about reference data
+
+- Admins only: `GET /api/reference-data` lists the lists, `GET|POST /api/reference-data/{key}`,
+  `PUT|DELETE /api/reference-data/{key}/{id}`. Body `{ code, name, group, flags }`.
+- A list can carry `flags` (`[{ key, label }]`); its values then have `flags: { key: bool }`. A flag left out keeps its value.
+- `lanes`: flags `active` (on at the front desk) and `needsEndorsement`. Codes are 1 to 3 letters, saved uppercase, unique.
+  S, V and R come back `locked: true`: their code can't change and they can't be deleted (the queue order uses them).
+- Any value used by records can't be deleted (409); rename it instead.
+
 ## Rules
 
 - The token stays in `sessionStorage`, handled by `client.js`. Don't copy it into `localStorage`,

@@ -292,6 +292,8 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 - Send dates as picked (`2026-11-17T09:00`). UTC (`...Z`) is turned into PH time.
 - Cancelled claims are hidden from lists and totals, and can't be edited.
 - Every change goes to AuditLog (`Transaction`).
+- A new claim for someone already open in that day's queue (not released, not cancelled) is 409
+  `{ message, transactionId, queueNoCode, sameDay: true }`. Send `confirmSameDay: true` for a real second visit.
 - `assistanceCode` (program) is a code from `/api/lookups/assistance-programs`, Social Worker / admins only.
   Releasing needs it, like the amount.
 - Money fields, program and release: only the social worker holding the claim, or an admin (403 otherwise:

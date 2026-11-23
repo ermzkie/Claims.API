@@ -85,6 +85,7 @@ public class TransactionSaveTests
       date = "2026-11-10T09:00",
       laneTypeId = o.LaneId,
       patientPersonId = o.PatientId,
+      confirmSameDay = true,
     });
     Assert.Equal(HttpStatusCode.Created, response.StatusCode);
     return (await response.Content.ReadFromJsonAsync<TransactionResponseDto>())!.TransactionId;
@@ -107,6 +108,7 @@ public class TransactionSaveTests
       date = "2026-11-09T23:30:00.000Z",
       laneTypeId = o.LaneId,
       patientPersonId = o.PatientId,
+      confirmSameDay = true,
     });
     var saved = await response.Content.ReadFromJsonAsync<TransactionResponseDto>();
 
@@ -118,6 +120,7 @@ public class TransactionSaveTests
       date = "2026-11-10T09:00",
       laneTypeId = o.LaneId,
       patientPersonId = o.PatientId,
+      confirmSameDay = true,
     });
     var plainSaved = await plain.Content.ReadFromJsonAsync<TransactionResponseDto>();
 
@@ -137,6 +140,7 @@ public class TransactionSaveTests
       date = "2026-11-10T09:00",
       laneTypeId = o.LaneId,
       patientPersonId = o.PatientId,
+      confirmSameDay = true,
     });
 
     Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -173,6 +177,7 @@ public class TransactionSaveTests
       date = "2026-11-10T09:00",
       laneTypeId = o.LaneId,
       patientPersonId = o.PatientId,
+      confirmSameDay = true,
       amount = 5000m,
     });
     Assert.Equal(HttpStatusCode.Forbidden, withAmount.StatusCode);
@@ -430,7 +435,7 @@ public class TransactionSaveTests
       otherLane = lane.LaneTypeId;
     }
     var id = await CreateAsync(o);
-    var inOther = await Save(o.Front, new { date = "2026-11-10T09:05", laneTypeId = otherLane, patientPersonId = o.PatientId });
+    var inOther = await Save(o.Front, new { date = "2026-11-10T09:05", laneTypeId = otherLane, patientPersonId = o.PatientId, confirmSameDay = true });
     Assert.Equal((short)1, (await inOther.Content.ReadFromJsonAsync<TransactionResponseDto>())!.QueueNo);
 
     Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Front, new { transactionId = id, laneTypeId = otherLane })).StatusCode);
@@ -522,5 +527,54 @@ public class TransactionSaveTests
     Assert.Contains("Check out the claim first.", await money.Content.ReadAsStringAsync());
 
     Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Front, new { transactionId = id, remarks = "brought papers" })).StatusCode);
+  }
+
+  private static Task<HttpResponseMessage> File(Office o, string date = "2026-11-10T09:00", bool confirm = false) =>
+    Save(o.Front, new { date, laneTypeId = o.LaneId, patientPersonId = o.PatientId, confirmSameDay = confirm });
+
+  [Fact]
+  public async Task SameDay_SecondOpenClaim_Is409_UnlessConfirmed()
+  {
+    await using var o = await SetupAsync();
+    var first = await CreateAsync(o);
+
+    var again = await File(o);
+    Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+    using var json = System.Text.Json.JsonDocument.Parse(await again.Content.ReadAsStringAsync());
+    Assert.True(json.RootElement.GetProperty("sameDay").GetBoolean());
+    Assert.Equal("R1", json.RootElement.GetProperty("queueNoCode").GetString());
+    Assert.Equal(first, json.RootElement.GetProperty("transactionId").GetInt32());
+
+    Assert.Equal(HttpStatusCode.Created, (await File(o, confirm: true)).StatusCode);
+  }
+
+  [Fact]
+  public async Task SameDay_ReleasedEarlierToday_IsAllowed()
+  {
+    await using var o = await SetupAsync();
+    var id = await CreateAsync(o);
+    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
+    Assert.Equal(HttpStatusCode.NoContent,
+      (await Save(o.Worker, new { transactionId = id, amount = 100m, assistanceCode = "AICS", isReleased = true })).StatusCode);
+
+    Assert.Equal(HttpStatusCode.Created, (await File(o)).StatusCode);
+  }
+
+  [Fact]
+  public async Task SameDay_OtherDay_IsAllowed()
+  {
+    await using var o = await SetupAsync();
+    Assert.Equal(HttpStatusCode.Created, (await File(o, "2026-11-09T09:00")).StatusCode);
+    Assert.Equal(HttpStatusCode.Created, (await File(o, "2026-11-10T09:00")).StatusCode);
+  }
+
+  [Fact]
+  public async Task SameDay_CancelledClaim_IsAllowed()
+  {
+    await using var o = await SetupAsync();
+    var id = await CreateAsync(o);
+    await o.Admin.PostAsJsonAsync($"/api/transactions/{id}/cancel", new { reason = "wrong lane" });
+
+    Assert.Equal(HttpStatusCode.Created, (await File(o)).StatusCode);
   }
 }

@@ -287,6 +287,31 @@ public class TransactionsController(
     if (problem is not null)
       return BadRequest(new { message = problem });
 
+    if (isNew && !dto.ConfirmSameDay)
+    {
+      var day = next.Date!.Value.Date;
+      var nextDay = day.AddDays(1);
+      var open = await context.Transactions.AsNoTracking()
+        .Where(ClaimRules.Counted)
+        .Where(x => x.PatientPersonId == next.PatientPersonId && x.IsReleased != true && x.Date >= day && x.Date < nextDay)
+        .Include(x => x.LaneType)
+        .Include(x => x.PatientPerson)
+        .OrderByDescending(x => x.TransactionId)
+        .FirstOrDefaultAsync(cancellationToken);
+      if (open is not null)
+      {
+        var code = $"{open.LaneType?.LaneTypeCode}{open.QueueNo}";
+        var name = string.Join(", ", new[] { open.PatientPerson?.LastName, open.PatientPerson?.FirstName }.Where(n => !string.IsNullOrWhiteSpace(n)));
+        return Conflict(new
+        {
+          message = $"{name} is already in today's queue as {code}.",
+          transactionId = open.TransactionId,
+          queueNoCode = code,
+          sameDay = true,
+        });
+      }
+    }
+
     // queue numbers are per day and lane, so a claim moved to another one gets a new number
     var newQueue = isNew
       || changed.Contains("laneTypeId")

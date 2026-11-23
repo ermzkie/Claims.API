@@ -216,9 +216,9 @@ public class TransactionsController(
       return NotFound(new { message = "Transaction not found." });
 
     var isNew = transaction is null;
-    // the desk files new claims; after that it's the social worker's
-    if (!isNew && !CanHandleMoney)
-      return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only social workers and admins can change a filed claim." });
+    // the desk can still fix a claim nobody has picked up; after that it's the social worker's
+    if (!isNew && !CanHandleMoney && transaction!.SocialWorkerUserId is not null)
+      return StatusCode(StatusCodes.Status403Forbidden, new { message = "A social worker has this claim now. Ask them to change it." });
     if (transaction is not null && ClaimRules.IsCancelled(transaction))
       return Conflict(new { message = "This claim was cancelled. An admin can restore it." });
 

@@ -94,10 +94,19 @@ public class AccessTests
   }
 
   [Fact]
-  public async Task Frontliner_CanStillFileANewClaim()
+  public async Task Frontliner_CanFixAClaimStillWaiting()
   {
     await using var o = await SetupAsync();
-    // the setup filed one as the frontliner already
+    // the setup filed one as the frontliner already; the intake sheet goes back to fix it
+    var edit = await o.Front.PostAsJsonAsync("/api/transactions/save", new { transactionId = o.ClaimId, remarks = "late" });
+    Assert.Equal(HttpStatusCode.NoContent, edit.StatusCode);
+  }
+
+  [Fact]
+  public async Task Frontliner_CannotChangeAClaimAWorkerPickedUp()
+  {
+    await using var o = await SetupAsync();
+    await o.Worker.PostAsync($"/api/transactions/{o.ClaimId}/checkout-social-worker", null);
     var edit = await o.Front.PostAsJsonAsync("/api/transactions/save", new { transactionId = o.ClaimId, remarks = "late" });
     Assert.Equal(HttpStatusCode.Forbidden, edit.StatusCode);
     Assert.Equal(HttpStatusCode.NoContent,

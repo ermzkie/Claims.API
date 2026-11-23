@@ -202,8 +202,8 @@ pages added to `routes.js` are protected automatically.
 | POST                | `/api/users/{id}/reset-password` | Admin / Super Admin | `{ temporaryPassword }`                                                                       |
 | POST                | `/api/users/{id}/deactivate`     | Admin / Super Admin | Turn account off                                                                              |
 | POST                | `/api/users/{id}/activate`       | Admin / Super Admin | Turn account on                                                                               |
-| GET                 | `/api/natureofservice`           | logged in           | List natures of service                                                                       |
-| POST / PUT / DELETE | `/api/natureofservice[/{id}]`    | Admin / Super Admin | `{ natureDesc }`                                                                              |
+| GET                 | `/api/natureofservice`           | logged in           | Active natures `{ natureId, natureDesc, status }`. Admins: `?includeInactive=true` for turned-off ones |
+| POST / PUT / DELETE | `/api/natureofservice[/{id}]`    | Admin / Super Admin | `{ natureDesc, status? }`. PUT without `status` keeps it. Same name = 409. DELETE of a nature claims use = 409 (turn it off instead) |
 | GET                 | `/api/lookups/{list}`            | logged in           | Dropdown values `[{ id, code, name }]`: `sexes`, `civil-statuses`, `name-suffixes`, `relationship-statuses`, `modes-of-assistance`, `sources-of-assistance`, `provinces`, `cities?provinceId=`, `barangays?cityMunicipalityId=` |
 | GET                 | `/api/persons`                   | logged in           | Search, paged: `{ items, total, page, pageSize }`. Query: `search`, `cityMunicipalityId`, `barangayId`, `sexId`, `sector` (repeatable), `page`, `pageSize` (max 100) |
 | GET                 | `/api/persons/{id}`              | logged in           | One person with `family`, `familyOf`, `cityMunicipalityId`, `provinceId` |
@@ -286,7 +286,8 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 - Claims (list, details, history), dashboard, creditor totals and claims, reports and a person's claims:
   Social Worker and admins only. Frontliners get 403.
 - Creditor claims CSV export and the removed creditors list: admins only.
-- Frontliners file new claims; changing a filed claim is for social workers and admins (403).
+- Frontliners file new claims and can fix one until a social worker picks it up (403 after that).
+  The money side stays social workers and admins only.
 - A frontliner (without other roles) edits person basics only: changing civil status, occupation or income,
   or any family link, is 403. Resending the same values is fine.
 

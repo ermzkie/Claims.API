@@ -12,25 +12,40 @@ namespace Claims.API.Controllers;
 [ApiController]
 public class NatureOfServiceController : ControllerBase
 {
+  private const int MaxDesc = 50;
+
   private readonly ApplicationDbContext _context;
   private readonly ICurrentUser _currentUser;
-  public NatureOfServiceController(ApplicationDbContext context, ICurrentUser currentUser)
+  private readonly TimeProvider _time;
+  public NatureOfServiceController(ApplicationDbContext context, ICurrentUser currentUser, TimeProvider time)
   {
     _context = context;
     _currentUser = currentUser;
+    _time = time;
   }
 
-  // GET: api/NatureOfService
+  private bool IsAdmin =>
+    _currentUser.IsInRole(RoleNames.SuperAdministrator) || _currentUser.IsInRole(RoleNames.Administrator);
+
+  private DateTime Now() => _time.GetLocalNow().DateTime;
+
+  // GET: api/NatureOfService (admins can add ?includeInactive=true to find turned-off ones)
   [HttpGet]
-  public async Task<ActionResult<IEnumerable<NatureOfServiceResponseDto>>> GetAll()
+  public async Task<ActionResult<IEnumerable<NatureOfServiceResponseDto>>> GetAll([FromQuery] bool includeInactive = false)
   {
-    var records = await _context.NatureOfServices
-        .AsNoTracking()
-        .Where(x => x.Status == true)
+    var query = _context.NatureOfServices.AsNoTracking();
+    if (!includeInactive || !IsAdmin)
+    {
+      query = query.Where(x => x.Status);
+    }
+
+    var records = await query
+        .OrderBy(x => x.NatureDesc)
         .Select(x => new NatureOfServiceResponseDto
         {
           NatureId = x.NatureId,
-          NatureDesc = x.NatureDesc
+          NatureDesc = x.NatureDesc,
+          Status = x.Status
         })
         .ToListAsync();
 
@@ -47,7 +62,8 @@ public class NatureOfServiceController : ControllerBase
         .Select(x => new NatureOfServiceResponseDto
         {
           NatureId = x.NatureId,
-          NatureDesc = x.NatureDesc
+          NatureDesc = x.NatureDesc,
+          Status = x.Status
         })
         .FirstOrDefaultAsync();
 
@@ -63,20 +79,22 @@ public class NatureOfServiceController : ControllerBase
   public async Task<ActionResult<NatureOfServiceResponseDto>> Create(
       CreateNatureOfServiceDto dto)
   {
-    if (string.IsNullOrWhiteSpace(dto.NatureDesc))
+    var desc = Clean(dto.NatureDesc);
+    if (DescError(desc) is { } error)
     {
-      return BadRequest(new
-      {
-        message = "Nature description cannot be empty."
-      });
+      return BadRequest(new { message = error });
+    }
+    if (await SameNameAsync(desc!, exceptId: null) is { } same)
+    {
+      return Conflict(new { message = SameNameMessage(same) });
     }
 
     var record = new NatureOfService
     {
-      NatureDesc = dto.NatureDesc.Trim(),
+      NatureDesc = desc,
       Status = true,
       CreatedBy = _currentUser.Id,
-      DateCreated = DateTime.UtcNow.AddHours(8)
+      DateCreated = Now()
     };
 
     _context.NatureOfServices.Add(record);
@@ -86,7 +104,8 @@ public class NatureOfServiceController : ControllerBase
     var response = new NatureOfServiceResponseDto
     {
       NatureId = record.NatureId,
-      NatureDesc = record.NatureDesc
+      NatureDesc = record.NatureDesc,
+      Status = record.Status
     };
 
     return CreatedAtAction(
@@ -103,12 +122,10 @@ public class NatureOfServiceController : ControllerBase
       short id,
       UpdateNatureOfServiceDto dto)
   {
-    if (string.IsNullOrWhiteSpace(dto.NatureDesc))
+    var desc = Clean(dto.NatureDesc);
+    if (DescError(desc) is { } error)
     {
-      return BadRequest(new
-      {
-        message = "Nature description cannot be empty."
-      });
+      return BadRequest(new { message = error });
     }
 
     var record = await _context.NatureOfServices
@@ -121,12 +138,19 @@ public class NatureOfServiceController : ControllerBase
         message = "Nature of service not found."
       });
     }
+    if (await SameNameAsync(desc!, exceptId: id) is { } same)
+    {
+      return Conflict(new { message = SameNameMessage(same) });
+    }
 
-    // Update only the permitted property.
-    record.NatureDesc = dto.NatureDesc.Trim();
-    record.Status = dto.Status;
+    record.NatureDesc = desc;
+    // left out = keep it as is; a rename used to turn it off
+    if (dto.Status is { } status)
+    {
+      record.Status = status;
+    }
     record.LastUpdatedBy = _currentUser.Id;
-    record.DateLastUpdated = DateTime.UtcNow.AddHours(8);
+    record.DateLastUpdated = Now();
 
     await _context.SaveChangesAsync();
 
@@ -149,10 +173,41 @@ public class NatureOfServiceController : ControllerBase
       });
     }
 
+    // claims point at it, so only unused ones can really go
+    var claims = await _context.TransactionServices.CountAsync(x => x.NatureId == id);
+    if (claims > 0)
+    {
+      return Conflict(new
+      {
+        message = $"Can't delete \"{record.NatureDesc}\": {claims:N0} claim(s) use it. Turn it off instead."
+      });
+    }
+
     _context.NatureOfServices.Remove(record);
 
     await _context.SaveChangesAsync();
 
     return NoContent();
   }
+
+  private static string? Clean(string? value) =>
+    string.IsNullOrWhiteSpace(value) ? null : string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+  private static string? DescError(string? desc) =>
+    desc is null ? "Nature description cannot be empty."
+    : desc.Length > MaxDesc ? $"Nature description can be at most {MaxDesc} characters."
+    : null;
+
+  private Task<NatureOfService?> SameNameAsync(string desc, short? exceptId)
+  {
+    var upper = desc.ToUpper();
+    return _context.NatureOfServices.AsNoTracking()
+        .Where(x => x.NatureDesc != null && x.NatureDesc.Trim().ToUpper() == upper && x.NatureId != exceptId)
+        .FirstOrDefaultAsync();
+  }
+
+  private static string SameNameMessage(NatureOfService same) =>
+    same.Status
+      ? $"\"{same.NatureDesc}\" already exists."
+      : $"\"{same.NatureDesc}\" already exists but is turned off. Turn it back on instead.";
 }

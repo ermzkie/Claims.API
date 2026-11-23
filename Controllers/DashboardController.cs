@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Claims.API.Controllers;
 
+[Authorize(Policy = AuthPolicies.ClaimsViewer)]
 [Route("api/dashboard")]
 [ApiController]
 public class DashboardController(ApplicationDbContext context, TimeProvider time, ILogger<DashboardController> logger)

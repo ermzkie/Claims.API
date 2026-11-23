@@ -13,6 +13,7 @@ public class CreditorArchiveController(ApplicationDbContext context, ICurrentUse
   : ControllerBase
 {
   [HttpGet("removed")]
+  [Authorize(Policy = AuthPolicies.UserAdmin)]
   public async Task<ActionResult<List<CreditorResponseDto>>> Removed() =>
     (await context.Creditors.AsNoTracking()
       .Where(c => !c.Status)

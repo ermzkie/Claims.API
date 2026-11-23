@@ -9,6 +9,8 @@ namespace Claims.API.Auth;
 public static class AuthPolicies
 {
   public const string UserAdmin = "UserAdmin";
+  // claims, money and reports: not for the front desk
+  public const string ClaimsViewer = "ClaimsViewer";
   public const string AllowPendingPasswordChange = "AllowPendingPasswordChange";
 
   public static IServiceCollection AddClaimsAuthentication(this IServiceCollection services, IConfiguration configuration)
@@ -80,6 +82,10 @@ public static class AuthPolicies
       .AddPolicy(UserAdmin, new AuthorizationPolicyBuilder()
         .Combine(basePolicy)
         .RequireRole(RoleNames.SuperAdministrator, RoleNames.Administrator)
+        .Build())
+      .AddPolicy(ClaimsViewer, new AuthorizationPolicyBuilder()
+        .Combine(basePolicy)
+        .RequireRole(RoleNames.SocialWorker, RoleNames.SuperAdministrator, RoleNames.Administrator)
         .Build())
       .AddPolicy(AllowPendingPasswordChange, policy => policy
         .RequireAuthenticatedUser());

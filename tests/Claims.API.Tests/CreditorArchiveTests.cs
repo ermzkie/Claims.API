@@ -33,10 +33,12 @@ public class CreditorArchiveTests
   [Fact]
   public async Task Removed_ListsOnlyRemovedCreditors()
   {
-    var (app, _, staff, _) = await StartAsync();
+    var (app, admin, staff, _) = await StartAsync();
     await using var __ = app;
 
-    var removed = await staff.GetFromJsonAsync<List<CreditorResponseDto>>("/api/creditor/removed");
+    // the removed list is admins only now
+    Assert.Equal(HttpStatusCode.Forbidden, (await staff.GetAsync("/api/creditor/removed")).StatusCode);
+    var removed = await admin.GetFromJsonAsync<List<CreditorResponseDto>>("/api/creditor/removed");
 
     Assert.Equal([4, 3, 2], removed!.Select(c => c.CreditorId));
   }

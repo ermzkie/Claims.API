@@ -68,64 +68,73 @@ public class ReportsController(ApplicationDbContext context)
                 x.Date < exclusiveEndDate);
         }
 
-        var count = await query.CountAsync();
+        var reportRows = query.SelectMany(
+            transaction => transaction.TransactionServices
+                .SelectMany(service => service.ServiceFundAllocations)
+                .Where(allocation => allocation.Status)
+                .DefaultIfEmpty(),
+            (transaction, allocation) => new { Transaction = transaction, Allocation = allocation });
+
+        var count = await reportRows.CountAsync();
         if (count > MaxReportRows)
         {
             return BadRequest(new
             {
-                message = $"This report has {count:N0} claims, more than {MaxReportRows:N0}. Narrow the dates or pick a program.",
+                message = $"This report has {count:N0} rows, more than {MaxReportRows:N0}. Narrow the dates or pick a program.",
             });
         }
 
-        var records = await query
-            .OrderByDescending(x => x.Date)
+        var records = await reportRows
+            .OrderByDescending(x => x.Transaction.Date)
+            .ThenBy(x => x.Transaction.TransactionId)
+            .ThenBy(x => x.Allocation == null ? 0 : x.Allocation.ServiceFundAllocationId)
             .Select(x => new
             {
-                x.TransactionId,
-                x.AssistanceCode,
-                x.RefNo,
-                x.Date,
-                x.PatientPersonId,
+                x.Transaction.TransactionId,
+                x.Transaction.AssistanceCode,
+                x.Transaction.RefNo,
+                x.Transaction.Date,
+                x.Transaction.PatientPersonId,
 
-                FirstName = x.PatientPerson != null
-                    ? x.PatientPerson.FirstName
+                FirstName = x.Transaction.PatientPerson != null
+                    ? x.Transaction.PatientPerson.FirstName
                     : null,
 
-                MiddleName = x.PatientPerson != null
-                    ? x.PatientPerson.MiddleName
+                MiddleName = x.Transaction.PatientPerson != null
+                    ? x.Transaction.PatientPerson.MiddleName
                     : null,
 
-                LastName = x.PatientPerson != null
-                    ? x.PatientPerson.LastName
+                LastName = x.Transaction.PatientPerson != null
+                    ? x.Transaction.PatientPerson.LastName
                     : null,
 
                 BarangayName =
-                    x.PatientPerson != null &&
-                    x.PatientPerson.BarangayNavigation != null
-                    ? x.PatientPerson.BarangayNavigation.BarangayName
+                    x.Transaction.PatientPerson != null &&
+                    x.Transaction.PatientPerson.BarangayNavigation != null
+                    ? x.Transaction.PatientPerson.BarangayNavigation.BarangayName
                     : null,
 
                 CityName =
-                    x.PatientPerson != null &&
-                    x.PatientPerson.BarangayNavigation != null &&
-                    x.PatientPerson.BarangayNavigation.CityMunicipality != null
-                    ? x.PatientPerson.BarangayNavigation
+                    x.Transaction.PatientPerson != null &&
+                    x.Transaction.PatientPerson.BarangayNavigation != null &&
+                    x.Transaction.PatientPerson.BarangayNavigation.CityMunicipality != null
+                    ? x.Transaction.PatientPerson.BarangayNavigation
                         .CityMunicipality.CityMunicipalityName
                     : null,
 
                 ProvinceName =
-                    x.PatientPerson != null &&
-                    x.PatientPerson.BarangayNavigation != null &&
-                    x.PatientPerson.BarangayNavigation.CityMunicipality != null &&
-                    x.PatientPerson.BarangayNavigation.CityMunicipality.Province != null
-                    ? x.PatientPerson.BarangayNavigation
+                    x.Transaction.PatientPerson != null &&
+                    x.Transaction.PatientPerson.BarangayNavigation != null &&
+                    x.Transaction.PatientPerson.BarangayNavigation.CityMunicipality != null &&
+                    x.Transaction.PatientPerson.BarangayNavigation.CityMunicipality.Province != null
+                    ? x.Transaction.PatientPerson.BarangayNavigation
                         .CityMunicipality.Province.ProvinceName
                     : null,
 
-                x.Representative,
-                x.Amount,
-                x.CreditorId,
-                x.IsReleased
+                x.Transaction.Representative,
+                Amount = x.Allocation == null ? null : x.Allocation.Amount,
+                CreditorId = x.Allocation == null ? null : x.Allocation.CreditorId,
+                x.Transaction.IsReleased
             })
             .ToListAsync();
 
@@ -199,8 +208,10 @@ public class ReportsController(ApplicationDbContext context)
         if (parameters.SourceId.HasValue)
         {
             query = query.Where(x =>
-                x.FundSource != null &&
-                x.FundSource.SourceId == parameters.SourceId.Value);
+                x.TransactionServices.Any(service => service.ServiceFundAllocations.Any(allocation =>
+                    allocation.Status
+                    && allocation.FundSource != null
+                    && allocation.FundSource.SourceId == parameters.SourceId.Value)));
         }
 
         // Date From filter
@@ -222,45 +233,56 @@ public class ReportsController(ApplicationDbContext context)
                 x.Date < exclusiveEndDate);
         }
 
-        // Retrieve transaction and beneficiary details
+        // Retrieve allocation and beneficiary details
         var records = await query
+            .SelectMany(
+                transaction => transaction.TransactionServices
+                    .SelectMany(service => service.ServiceFundAllocations)
+                    .Where(allocation => allocation.Status
+                        && (!parameters.SourceId.HasValue
+                            || (allocation.FundSource != null
+                                && allocation.FundSource.SourceId == parameters.SourceId.Value)))
+                    .DefaultIfEmpty(),
+                (transaction, allocation) => new { Transaction = transaction, Allocation = allocation })
             .Select(x => new
             {
-                PatientPersonId = x.PatientPersonId!.Value,
+                x.Transaction.TransactionId,
+                PatientPersonId = x.Transaction.PatientPersonId!.Value,
 
-                SourceId = x.FundSource != null
-                    ? x.FundSource.SourceId
+                SourceId = x.Allocation != null && x.Allocation.FundSource != null
+                    ? x.Allocation.FundSource.SourceId
                     : (short?)null,
 
                 SourceDesc =
-                    x.FundSource != null &&
-                    x.FundSource.Source != null
-                    ? x.FundSource.Source.SourceDesc
+                    x.Allocation != null &&
+                    x.Allocation.FundSource != null &&
+                    x.Allocation.FundSource.Source != null
+                    ? x.Allocation.FundSource.Source.SourceDesc
                     : null,
 
-                Amount = x.Amount,
+                Amount = x.Allocation == null ? null : x.Allocation.Amount,
 
-                FirstName = x.PatientPerson!.FirstName,
-                MiddleName = x.PatientPerson.MiddleName,
-                LastName = x.PatientPerson.LastName,
+                FirstName = x.Transaction.PatientPerson!.FirstName,
+                MiddleName = x.Transaction.PatientPerson.MiddleName,
+                LastName = x.Transaction.PatientPerson.LastName,
 
                 BarangayName =
-                    x.PatientPerson.BarangayNavigation != null
-                    ? x.PatientPerson.BarangayNavigation.BarangayName
+                    x.Transaction.PatientPerson.BarangayNavigation != null
+                    ? x.Transaction.PatientPerson.BarangayNavigation.BarangayName
                     : null,
 
                 CityName =
-                    x.PatientPerson.BarangayNavigation != null &&
-                    x.PatientPerson.BarangayNavigation.CityMunicipality != null
-                    ? x.PatientPerson.BarangayNavigation
+                    x.Transaction.PatientPerson.BarangayNavigation != null &&
+                    x.Transaction.PatientPerson.BarangayNavigation.CityMunicipality != null
+                    ? x.Transaction.PatientPerson.BarangayNavigation
                         .CityMunicipality.CityMunicipalityName
                     : null,
 
                 ProvinceName =
-                    x.PatientPerson.BarangayNavigation != null &&
-                    x.PatientPerson.BarangayNavigation.CityMunicipality != null &&
-                    x.PatientPerson.BarangayNavigation.CityMunicipality.Province != null
-                    ? x.PatientPerson.BarangayNavigation
+                    x.Transaction.PatientPerson.BarangayNavigation != null &&
+                    x.Transaction.PatientPerson.BarangayNavigation.CityMunicipality != null &&
+                    x.Transaction.PatientPerson.BarangayNavigation.CityMunicipality.Province != null
+                    ? x.Transaction.PatientPerson.BarangayNavigation
                         .CityMunicipality.Province.ProvinceName
                     : null
             })
@@ -303,7 +325,10 @@ public class ReportsController(ApplicationDbContext context)
                     AssistanceType =
                         group.Key.SourceDesc ?? "N/A",
 
-                    AvailmentCount = group.Count(),
+                    AvailmentCount = group
+                        .Select(x => x.TransactionId)
+                        .Distinct()
+                        .Count(),
 
                     TotalAmount = group.Sum(x =>
                         x.Amount ?? 0m)

@@ -30,5 +30,5 @@ public partial class Creditor
     public DateTime? DateLastUpdated { get; set; }
 
     [InverseProperty("Creditor")]
-    public virtual ICollection<Transaction> Transactions { get; set; } = new List<Transaction>();
+    public virtual ICollection<ServiceFundAllocation> ServiceFundAllocations { get; set; } = new List<ServiceFundAllocation>();
 }

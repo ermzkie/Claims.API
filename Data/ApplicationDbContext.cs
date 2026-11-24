@@ -17,7 +17,6 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<ApprovalStatus> ApprovalStatuses { get; set; }
 
-    public virtual DbSet<Assistance> Assistances { get; set; }
 
     public virtual DbSet<AuditLog> AuditLogs { get; set; }
 
@@ -29,11 +28,15 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<Creditor> Creditors { get; set; }
 
+    public virtual DbSet<Desk> Desks { get; set; }
+
     public virtual DbSet<FamilyComposition> FamilyCompositions { get; set; }
 
     public virtual DbSet<FundSource> FundSources { get; set; }
 
     public virtual DbSet<LaneType> LaneTypes { get; set; }
+
+    public virtual DbSet<Medicine> Medicines { get; set; }
 
     public virtual DbSet<ModeOfAssistance> ModeOfAssistances { get; set; }
 
@@ -51,11 +54,15 @@ public partial class ApplicationDbContext : DbContext
 
     public virtual DbSet<Role> Roles { get; set; }
 
+    public virtual DbSet<ServiceFundAllocation> ServiceFundAllocations { get; set; }
+
     public virtual DbSet<Sex> Sexes { get; set; }
 
     public virtual DbSet<SourceOfAssistance> SourceOfAssistances { get; set; }
 
     public virtual DbSet<Transaction> Transactions { get; set; }
+
+    public virtual DbSet<TransactionMedicine> TransactionMedicines { get; set; }
 
     public virtual DbSet<TransactionService> TransactionServices { get; set; }
 
@@ -72,11 +79,6 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.Id).ValueGeneratedOnAdd();
         });
 
-        modelBuilder.Entity<Assistance>(entity =>
-        {
-            entity.Property(e => e.AssistanceId).ValueGeneratedOnAdd();
-            entity.Property(e => e.IsActive).HasDefaultValue(true, "DF_Assistance_isActive");
-        });
 
         modelBuilder.Entity<AuditLog>(entity =>
         {
@@ -114,6 +116,11 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.Status).HasDefaultValue(true, "DF_Creditor_Status");
         });
 
+        modelBuilder.Entity<Desk>(entity =>
+        {
+            entity.Property(e => e.Status).HasDefaultValue(true, "DF_Desk_Status");
+        });
+
         modelBuilder.Entity<FamilyComposition>(entity =>
         {
             entity.Property(e => e.DateCreated).HasDefaultValueSql("(getdate())", "DF_FamilyComposition_DateCreated");
@@ -135,6 +142,12 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.Status).HasDefaultValue(true, "DF_FundSource_Status");
 
             entity.HasOne(d => d.Source).WithMany(p => p.FundSources).HasConstraintName("FK_FundSource_SourceOfAssistance");
+        });
+
+        modelBuilder.Entity<Medicine>(entity =>
+        {
+            entity.Property(e => e.DateCreated).HasDefaultValueSql("(getdate())", "DF_Medicine_DateCreated");
+            entity.Property(e => e.Status).HasDefaultValue(true, "DF_Medicine_Status");
         });
 
         modelBuilder.Entity<NameSuffix>(entity =>
@@ -181,6 +194,24 @@ public partial class ApplicationDbContext : DbContext
             entity.Property(e => e.RelationshipStatusId).ValueGeneratedNever();
         });
 
+        modelBuilder.Entity<ServiceFundAllocation>(entity =>
+        {
+            entity.HasKey(e => e.ServiceFundAllocationId).HasName("PK_TransactionServiceFundSources");
+
+            entity.Property(e => e.DateCreated).HasDefaultValueSql("(getdate())", "DF_TransactionServiceFundSources_DateCreated");
+            entity.Property(e => e.Status).HasDefaultValue(true, "DF_TransactionServiceFundSources_Status");
+
+            entity.HasOne(d => d.Creditor).WithMany(p => p.ServiceFundAllocations).HasConstraintName("FK_ServiceFundAllocations_Creditor");
+
+            entity.HasOne(d => d.FundSource).WithMany(p => p.ServiceFundAllocations).HasConstraintName("FK_TransactionServiceFundSources_FundSource");
+
+            entity.HasOne(d => d.Mode).WithMany(p => p.ServiceFundAllocations).HasConstraintName("FK_TransactionServiceFundSources_ModeOfAssistance");
+
+            entity.HasOne(d => d.TranService).WithMany(p => p.ServiceFundAllocations)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_TransactionServiceFundSources_TransactionServices");
+        });
+
         modelBuilder.Entity<Transaction>(entity =>
         {
             entity.Property(e => e.ApprovalStatusId).HasDefaultValue((short)1, "DF_Transactions_IsApproved");
@@ -193,13 +224,7 @@ public partial class ApplicationDbContext : DbContext
 
             entity.HasOne(d => d.ApprovedByNavigation).WithMany(p => p.TransactionApprovedByNavigations).HasConstraintName("FK_Transactions_User");
 
-            entity.HasOne(d => d.Creditor).WithMany(p => p.Transactions).HasConstraintName("FK_Transactions_Creditor");
-
-            entity.HasOne(d => d.FundSource).WithMany(p => p.Transactions).HasConstraintName("FK_Transactions_FundSource");
-
             entity.HasOne(d => d.LaneType).WithMany(p => p.Transactions).HasConstraintName("FK_Transactions_LaneType");
-
-            entity.HasOne(d => d.Mode).WithMany(p => p.Transactions).HasConstraintName("FK_Transactions_ModeOfAssistance");
 
             entity.HasOne(d => d.PatientPerson).WithMany(p => p.TransactionPatientPeople).HasConstraintName("FK_Transactions_Person");
 
@@ -208,6 +233,20 @@ public partial class ApplicationDbContext : DbContext
             entity.HasOne(d => d.RepresentativePerson).WithMany(p => p.TransactionRepresentativePeople).HasConstraintName("FK_Transactions_Representative");
 
             entity.HasOne(d => d.SocialWorkerUser).WithMany(p => p.TransactionSocialWorkerUsers).HasConstraintName("FK_Transactions_SocialWorkerUser");
+        });
+
+        modelBuilder.Entity<TransactionMedicine>(entity =>
+        {
+            entity.Property(e => e.DateCreated).HasDefaultValueSql("(getdate())", "DF_TransactionMedicines_DateCreated");
+            entity.Property(e => e.Status).HasDefaultValue(true, "DF_TransactionMedicines_Status");
+
+            entity.HasOne(d => d.Medicine).WithMany(p => p.TransactionMedicines)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_TransactionMedicines_Medicine");
+
+            entity.HasOne(d => d.ServiceFundAllocation).WithMany(p => p.TransactionMedicines)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_TransactionMedicines_ServiceFundAllocations");
         });
 
         modelBuilder.Entity<TransactionService>(entity =>

@@ -18,5 +18,5 @@ public partial class ModeOfAssistance
     public string? ModeDesc { get; set; }
 
     [InverseProperty("Mode")]
-    public virtual ICollection<Transaction> Transactions { get; set; } = new List<Transaction>();
+    public virtual ICollection<ServiceFundAllocation> ServiceFundAllocations { get; set; } = new List<ServiceFundAllocation>();
 }

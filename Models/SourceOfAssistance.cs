@@ -13,6 +13,10 @@ public partial class SourceOfAssistance
     [Column("SourceID")]
     public short SourceId { get; set; }
 
+    [StringLength(3)]
+    [Unicode(false)]
+    public string? SourceCode { get; set; }
+
     [StringLength(50)]
     [Unicode(false)]
     public string? SourceDesc { get; set; }

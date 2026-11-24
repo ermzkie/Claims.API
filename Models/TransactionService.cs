@@ -22,6 +22,9 @@ public partial class TransactionService
     [InverseProperty("TransactionServices")]
     public virtual NatureOfService? Nature { get; set; }
 
+    [InverseProperty("TranService")]
+    public virtual ICollection<ServiceFundAllocation> ServiceFundAllocations { get; set; } = new List<ServiceFundAllocation>();
+
     [ForeignKey("TransactionId")]
     [InverseProperty("TransactionServices")]
     public virtual Transaction Transaction { get; set; } = null!;

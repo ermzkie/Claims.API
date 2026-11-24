@@ -11,7 +11,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Claims.API.Controllers;
 
-// old-system claims (no CreatedBy) came over with Status false, so it doesn't mean deleted for them
 [Authorize(Policy = AuthPolicies.ClaimsViewer)]
 [Route("api/creditor")]
 [ApiController]
@@ -22,16 +21,22 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
   [HttpGet("summary")]
   public async Task<ActionResult<List<CreditorTotalsDto>>> Totals()
   {
-    var rows = await context.Transactions.AsNoTracking()
-      .Where(t => t.CreditorId != null)
-      .GroupBy(t => t.CreditorId!.Value)
+    var rows = await context.ServiceFundAllocations.AsNoTracking()
+      .Where(allocation => allocation.Status && allocation.CreditorId != null
+        && allocation.TranService.Transaction.ApprovalStatusId == 3
+        && allocation.TranService.Transaction.IsReleased)
+      .GroupBy(allocation => allocation.CreditorId!.Value)
       .Select(g => new
       {
         CreditorId = g.Key,
-        Claims = g.Count(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)),
-        Amount = g.Where(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)).Sum(t => t.Amount),
-        LastClaim = g.Where(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)).Max(t => t.Date),
-        AllClaims = g.Count(),
+        Claims = g.Select(allocation => allocation.TranService.TransactionId)
+          .Distinct()
+          .Count(),
+        Amount = g.Sum(allocation => allocation.Amount),
+        LastClaim = g.Max(allocation => allocation.TranService.Transaction.Date),
+        AllClaims = g.Select(allocation => allocation.TranService.TransactionId)
+          .Distinct()
+          .Count(),
       })
       .ToListAsync();
 
@@ -52,25 +57,24 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
       return NotFound(new { message = "Creditor not found." });
     }
 
-    var claims = context.Transactions.AsNoTracking().Where(t => t.CreditorId == id);
-    var active = claims.Where(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null));
+    var claims = ClaimsForCreditor(id);
 
-    var byYear = await active
-      .Where(t => t.Date != null)
-      .GroupBy(t => t.Date!.Value.Year)
-      .Select(g => new { Year = g.Key, Claims = g.Count(), Amount = g.Sum(t => t.Amount) })
+    var byYear = await claims
+      .Where(claim => claim.Transaction.Date != null)
+      .GroupBy(claim => claim.Transaction.Date!.Value.Year)
+      .Select(g => new { Year = g.Key, Claims = g.Count(), Amount = g.Sum(claim => claim.Amount) })
       .ToListAsync();
 
     return new CreditorSummaryDto(
       id,
       creditor.CreditorName,
       creditor.Status,
-      await active.CountAsync(),
-      await active.SumAsync(t => t.Amount) ?? 0,
-      await active.MinAsync(t => t.Date),
-      await active.MaxAsync(t => t.Date),
       await claims.CountAsync(),
-      await active.CountAsync(t => t.Date == null),
+      await claims.SumAsync(claim => claim.Amount) ?? 0,
+      await claims.MinAsync(claim => claim.Transaction.Date),
+      await claims.MaxAsync(claim => claim.Transaction.Date),
+      await claims.CountAsync(),
+      await claims.CountAsync(claim => claim.Transaction.Date == null),
       byYear
         .OrderByDescending(y => y.Year)
         .Select(y => new CreditorYearDto(y.Year, y.Claims, y.Amount ?? 0))
@@ -85,9 +89,10 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
       return NotFound(new { message = "Creditor not found." });
     }
 
-    var counts = await context.Transactions.AsNoTracking()
-      .Where(t => t.CreditorId == id && (t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)) && t.AssistanceCode != null)
-      .GroupBy(t => t.AssistanceCode!)
+    var counts = await ClaimsForCreditor(id)
+      .Where(claim =>
+        claim.Transaction.AssistanceCode != null)
+      .GroupBy(claim => claim.Transaction.AssistanceCode!)
       .Select(g => new { Code = g.Key, Claims = g.Count() })
       .ToListAsync();
     var programs = await ProgramNamesAsync();
@@ -117,7 +122,7 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
     }
 
     var total = await query!.CountAsync();
-    var totalAmount = await query!.SumAsync(t => t.Amount) ?? 0;
+    var totalAmount = await query!.SumAsync(claim => claim.Amount) ?? 0;
     var rows = await Rows(Sorted(query!, filter).Skip((page - 1) * pageSize).Take(pageSize)).ToListAsync();
     var programs = await ProgramNamesAsync();
 
@@ -185,10 +190,11 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
 
     var start = new DateTime(year, 1, 1);
     var end = start.AddYears(1);
-    var months = await context.Transactions.AsNoTracking()
-      .Where(t => t.CreditorId == id && (t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)) && t.Date >= start && t.Date < end)
-      .GroupBy(t => t.Date!.Value.Month)
-      .Select(g => new { Month = g.Key, Claims = g.Count(), Amount = g.Sum(t => t.Amount) })
+    var months = await ClaimsForCreditor(id)
+      .Where(claim =>
+        claim.Transaction.Date >= start && claim.Transaction.Date < end)
+      .GroupBy(claim => claim.Transaction.Date!.Value.Month)
+      .Select(g => new { Month = g.Key, Claims = g.Count(), Amount = g.Sum(claim => claim.Amount) })
       .ToListAsync();
 
     return months
@@ -207,7 +213,7 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
     public string Dir { get; set; } = "desc";
   }
 
-  private async Task<(IQueryable<Transaction>? Query, ActionResult? Error)> FilteredClaimsAsync(int id, ClaimFilter f)
+  private async Task<(IQueryable<CreditorClaimQuery>? Query, ActionResult? Error)> FilteredClaimsAsync(int id, ClaimFilter f)
   {
     if (f.From is not null && f.To is not null && f.From.Value.Date > f.To.Value.Date)
     {
@@ -222,22 +228,22 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
       return (null, NotFound(new { message = "Creditor not found." }));
     }
 
-    var query = context.Transactions.AsNoTracking()
-      .Where(t => t.CreditorId == id && (t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)));
+    var query = ClaimsForCreditor(id);
     if (f.From is not null)
     {
       var from = f.From.Value.Date;
-      query = query.Where(t => t.Date >= from);
+      query = query.Where(claim => claim.Transaction.Date >= from);
     }
     if (f.To is not null)
     {
       var endExclusive = f.To.Value.Date.AddDays(1);
-      query = query.Where(t => t.Date < endExclusive);
+      query = query.Where(claim => claim.Transaction.Date < endExclusive);
     }
     if (!string.IsNullOrWhiteSpace(f.Program))
     {
       var code = f.Program.Trim();
-      query = query.Where(t => t.AssistanceCode != null && t.AssistanceCode.Trim() == code);
+      query = query.Where(claim =>
+        claim.Transaction.AssistanceCode != null && claim.Transaction.AssistanceCode.Trim() == code);
     }
     if (!string.IsNullOrWhiteSpace(f.Search))
     {
@@ -245,41 +251,65 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
       var whole = f.Search.Trim().ToUpperInvariant();
       foreach (var word in whole.Split(' ', StringSplitOptions.RemoveEmptyEntries))
       {
-        query = query.Where(t =>
-          (t.RefNo != null && t.RefNo.Contains(whole))
-          || (t.PatientPerson != null
-            && ((t.PatientPerson.LastName != null && t.PatientPerson.LastName.Contains(word))
-              || (t.PatientPerson.FirstName != null && t.PatientPerson.FirstName.Contains(word))
-              || (t.PatientPerson.MiddleName != null && t.PatientPerson.MiddleName.Contains(word)))));
+        query = query.Where(claim =>
+          (claim.Transaction.RefNo != null && claim.Transaction.RefNo.Contains(whole))
+          || (claim.Transaction.PatientPerson != null
+            && ((claim.Transaction.PatientPerson.LastName != null && claim.Transaction.PatientPerson.LastName.Contains(word))
+              || (claim.Transaction.PatientPerson.FirstName != null && claim.Transaction.PatientPerson.FirstName.Contains(word))
+              || (claim.Transaction.PatientPerson.MiddleName != null && claim.Transaction.PatientPerson.MiddleName.Contains(word)))));
       }
     }
     return (query, null);
   }
 
-  private static IQueryable<Transaction> Sorted(IQueryable<Transaction> query, ClaimFilter f) =>
+  private IQueryable<CreditorClaimQuery> ClaimsForCreditor(int creditorId)
+  {
+    var allocationTotals = context.ServiceFundAllocations.AsNoTracking()
+      .Where(allocation => allocation.Status && allocation.CreditorId == creditorId
+        && allocation.TranService.Transaction.ApprovalStatusId == 3
+        && allocation.TranService.Transaction.IsReleased)
+      .GroupBy(allocation => allocation.TranService.TransactionId)
+      .Select(group => new
+      {
+        TransactionId = group.Key,
+        Amount = group.Sum(allocation => allocation.Amount),
+      });
+
+    return from transaction in context.Transactions.AsNoTracking()
+      join allocation in allocationTotals on transaction.TransactionId equals allocation.TransactionId
+      select new CreditorClaimQuery { Transaction = transaction, Amount = allocation.Amount };
+  }
+
+  private static IQueryable<CreditorClaimQuery> Sorted(IQueryable<CreditorClaimQuery> query, ClaimFilter f) =>
     ((f.Sort, f.Dir) switch
     {
-      ("amount", "asc") => query.OrderBy(t => t.Amount == null).ThenBy(t => t.Amount),
-      ("amount", _) => query.OrderBy(t => t.Amount == null).ThenByDescending(t => t.Amount),
-      (_, "asc") => query.OrderBy(t => t.Date == null).ThenBy(t => t.Date),
-      _ => query.OrderBy(t => t.Date == null).ThenByDescending(t => t.Date),
-    }).ThenByDescending(t => t.TransactionId);
+      ("amount", "asc") => query.OrderBy(claim => claim.Amount == null).ThenBy(claim => claim.Amount),
+      ("amount", _) => query.OrderBy(claim => claim.Amount == null).ThenByDescending(claim => claim.Amount),
+      (_, "asc") => query.OrderBy(claim => claim.Transaction.Date == null).ThenBy(claim => claim.Transaction.Date),
+      _ => query.OrderBy(claim => claim.Transaction.Date == null).ThenByDescending(claim => claim.Transaction.Date),
+    }).ThenByDescending(claim => claim.Transaction.TransactionId);
 
-  private static IQueryable<ClaimRow> Rows(IQueryable<Transaction> query) =>
-    query.Select(t => new ClaimRow(
-      t.TransactionId,
-      t.RefNo,
-      t.Date,
-      t.PatientPersonId,
-      t.PatientPerson!.LastName,
-      t.PatientPerson.FirstName,
-      t.PatientPerson.MiddleName,
-      t.AssistanceCode,
-      t.Amount));
+  private static IQueryable<ClaimRow> Rows(IQueryable<CreditorClaimQuery> query) =>
+    query.Select(claim => new ClaimRow(
+      claim.Transaction.TransactionId,
+      claim.Transaction.RefNo,
+      claim.Transaction.Date,
+      claim.Transaction.PatientPersonId,
+      claim.Transaction.PatientPerson!.LastName,
+      claim.Transaction.PatientPerson.FirstName,
+      claim.Transaction.PatientPerson.MiddleName,
+      claim.Transaction.AssistanceCode,
+      claim.Amount));
 
   private sealed record ClaimRow(
     int TransactionId, string? RefNo, DateTime? Date, int? PatientPersonId,
     string? Last, string? First, string? Middle, string? AssistanceCode, decimal? Amount);
+
+  private sealed class CreditorClaimQuery
+  {
+    public Transaction Transaction { get; init; } = null!;
+    public decimal? Amount { get; init; }
+  }
 
   // quote text; a leading ' stops excel formulas (=, +, -, @)
   private static string Csv(string? value)
@@ -298,52 +328,51 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
   [HttpGet("{id:int}/claims/{transactionId:int}")]
   public async Task<ActionResult<CreditorClaimDetailDto>> Claim(int id, int transactionId)
   {
-    var t = await context.Transactions.AsNoTracking()
-      .Where(x => x.TransactionId == transactionId && x.CreditorId == id)
-      .Select(x => new
+    var t = await ClaimsForCreditor(id)
+      .Where(claim => claim.Transaction.TransactionId == transactionId)
+      .Select(claim => new
       {
-        x.TransactionId,
-        x.RefNo,
-        x.Date,
-        x.Amount,
-        x.AssistanceCode,
-        x.IsReleased,
-        x.Status,
-        x.PatientPersonId,
-        Patient = x.PatientPerson == null ? null : new
+        claim.Transaction.TransactionId,
+        claim.Transaction.RefNo,
+        claim.Transaction.Date,
+        claim.Amount,
+        claim.Transaction.AssistanceCode,
+        claim.Transaction.IsReleased,
+        claim.Transaction.ApprovalStatusId,
+        claim.Transaction.PatientPersonId,
+        Patient = claim.Transaction.PatientPerson == null ? null : new
         {
-          x.PatientPerson.LastName,
-          x.PatientPerson.FirstName,
-          x.PatientPerson.MiddleName,
-          Sex = x.PatientPerson.Sex != null ? x.PatientPerson.Sex.SexDesc : x.PatientPerson.Gender,
-          x.PatientPerson.Barangay,
-          x.PatientPerson.Municipality,
+          claim.Transaction.PatientPerson.LastName,
+          claim.Transaction.PatientPerson.FirstName,
+          claim.Transaction.PatientPerson.MiddleName,
+          Sex = claim.Transaction.PatientPerson.Sex != null
+            ? claim.Transaction.PatientPerson.Sex.SexDesc
+            : claim.Transaction.PatientPerson.Gender,
+          claim.Transaction.PatientPerson.Barangay,
+          claim.Transaction.PatientPerson.Municipality,
         },
-        x.RepresentativePersonId,
-        Representative = x.RepresentativePerson == null ? null : new
+        claim.Transaction.RepresentativePersonId,
+        Representative = claim.Transaction.RepresentativePerson == null ? null : new
         {
-          x.RepresentativePerson.LastName,
-          x.RepresentativePerson.FirstName,
-          x.RepresentativePerson.MiddleName,
+          claim.Transaction.RepresentativePerson.LastName,
+          claim.Transaction.RepresentativePerson.FirstName,
+          claim.Transaction.RepresentativePerson.MiddleName,
         },
-        RepresentativeText = x.Representative,
-        Mode = x.Mode != null ? x.Mode.ModeDesc : null,
-        FundSource = x.FundSource != null && x.FundSource.Source != null ? x.FundSource.Source.SourceDesc : null,
-        FundYear = x.FundSource != null ? x.FundSource.Year : null,
-        SocialWorkerUser = x.SocialWorkerUser == null ? null : new
+        RepresentativeText = claim.Transaction.Representative,
+        SocialWorkerUser = claim.Transaction.SocialWorkerUser == null ? null : new
         {
-          x.SocialWorkerUser.Lastname,
-          x.SocialWorkerUser.Firstname,
-          x.SocialWorkerUser.Middlename,
+          claim.Transaction.SocialWorkerUser.Lastname,
+          claim.Transaction.SocialWorkerUser.Firstname,
+          claim.Transaction.SocialWorkerUser.Middlename,
         },
-        x.SocialWorkerId,
-        x.SocialWorkerAssessment,
-        x.Remarks,
-        x.CreatedBy,
-        x.DateCreated,
-        x.LastUpdatedBy,
-        x.DateLastUpdated,
-        Natures = x.TransactionServices
+        claim.Transaction.SocialWorkerId,
+        claim.Transaction.SocialWorkerAssessment,
+        claim.Transaction.Remarks,
+        claim.Transaction.CreatedBy,
+        claim.Transaction.DateCreated,
+        claim.Transaction.LastUpdatedBy,
+        claim.Transaction.DateLastUpdated,
+        Natures = claim.Transaction.TransactionServices
           .Where(s => s.Nature != null)
           .Select(s => s.Nature!.NatureDesc)
           .ToList(),
@@ -353,6 +382,19 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
     {
       return NotFound(new { message = "Claim not found for this creditor." });
     }
+
+    var allocation = await context.ServiceFundAllocations.AsNoTracking()
+      .Where(a => a.Status && a.CreditorId == id && a.TranService.TransactionId == transactionId)
+      .OrderBy(a => a.ServiceFundAllocationId)
+      .Select(a => new
+      {
+        Mode = a.Mode != null ? a.Mode.ModeDesc : null,
+        FundSource = a.FundSource != null && a.FundSource.Source != null
+          ? a.FundSource.Source.SourceDesc
+          : null,
+        FundYear = a.FundSource != null ? a.FundSource.Year : null,
+      })
+      .FirstOrDefaultAsync();
 
     string? socialWorker = null;
     string? socialWorkerPosition = null;
@@ -389,9 +431,8 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
       t.AssistanceCode,
       ProgramName(programs, t.AssistanceCode),
       t.Natures.OfType<string>().ToList(),
-      // old system never recorded releases
-      t.CreatedBy is null && t.LastUpdatedBy is null ? null : t.IsReleased,
-      t.Status || (t.CreatedBy is null && t.LastUpdatedBy is null),
+      t.IsReleased,
+      t.ApprovalStatusId == 3 && t.IsReleased,
       t.Patient is null || t.PatientPersonId is null
         ? null
         : new ClaimPersonDto(
@@ -403,8 +444,8 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
       t.Representative is not null
         ? PersonName(t.Representative.LastName, t.Representative.FirstName, t.Representative.MiddleName)
         : string.IsNullOrWhiteSpace(t.RepresentativeText) ? null : t.RepresentativeText.Trim(),
-      t.Mode,
-      t.FundSource is null ? null : JoinNonEmpty(" ", t.FundSource, t.FundYear?.ToString()),
+      allocation?.Mode,
+      JoinNonEmpty(" ", allocation?.FundSource, allocation?.FundYear?.ToString()),
       socialWorker,
       socialWorkerPosition,
       t.SocialWorkerAssessment,
@@ -415,11 +456,11 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
       t.DateLastUpdated);
   }
 
-  // Assistance has no key to join on
+  // Program names are keyed by source code
   private async Task<Dictionary<string, string?>> ProgramNamesAsync() =>
-    (await context.Assistances.AsNoTracking()
-      .Where(a => a.AssistanceCode != null)
-      .Select(a => new { a.AssistanceCode, a.AssistanceType })
+    (await context.SourceOfAssistances.AsNoTracking()
+      .Where(source => source.SourceCode != null)
+      .Select(source => new { AssistanceCode = source.SourceCode, AssistanceType = source.SourceDesc })
       .ToListAsync())
     .GroupBy(a => a.AssistanceCode!.Trim().ToUpperInvariant())
     .ToDictionary(g => g.Key, g => g.First().AssistanceType);

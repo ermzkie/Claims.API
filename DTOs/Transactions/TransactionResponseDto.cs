@@ -33,4 +33,6 @@ public class TransactionResponseDto
   public int? LastUpdatedBy { get; set; }
   public DateTime? DateLastUpdated { get; set; }
   public List<short> NatureIds { get; set; } = [];
+
+  public int? ApprovalStatusId {get; set;}
 }

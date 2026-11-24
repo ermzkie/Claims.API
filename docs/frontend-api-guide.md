@@ -296,8 +296,14 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 - New claims need a date, lane and patient. The queue number is per day and lane.
 - Frontliners can't set `amount`, `creditorId`, `fundSourceId`, `modeId`, `socialWorkerAssessment` or
   `isReleased` (403).
-- Releasing needs an amount. A released claim is locked (409) until an admin saves `{ transactionId,
-  isReleased: false }` on its own.
+- Save can't release (409). The way is: save, `submit-for-approval`, an approver approves, then
+  `POST /api/transactions/{id}/release`. A released claim is locked (409) until an admin saves `{ transactionId,
+  isReleased: false }` on its own; that sends it back to Pending, so it goes through approval again.
+- Sending for approval needs the program, the amount and the client's birthdate (400), in that order. An approved
+  claim can't be sent again (409).
+- While a claim is with the approvers or approved, save is 409 for everyone.
+- Whoever worked on a claim (held it, took it over, sent it, or set its amount) can't approve it, admins included
+  (403 "You worked on this claim, so another approver has to approve it.").
 - The fund source must be for the claim's year. Only admins move a claim to another day.
 - Send dates as picked (`2026-11-17T09:00`). UTC (`...Z`) is turned into PH time.
 - Cancelled claims are hidden from lists and totals, and can't be edited.
@@ -305,7 +311,7 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 - A new claim for someone already open in that day's queue (not released, not cancelled) is 409
   `{ message, transactionId, queueNoCode, sameDay: true }`. Send `confirmSameDay: true` for a real second visit.
 - Releasing needs the client's birthdate (exact, or estimated from an approximate age: `birthdateEstimated` on the
-  person), every claim, old ones too. Same for `POST /api/transactions/{id}/release` (400).
+  person), every claim, old ones too (`POST /api/transactions/{id}/release`, 400).
 - Approvers can read claims, the dashboard, creditors and reports, like social workers. They can't change money
   fields or release.
 - Queue: a claim sent for approval or returned is out of the serving list, so the worker can take the next client.
@@ -313,7 +319,7 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 - `clearRepresentative: true` removes the representative (the linked person and the old free-text one).
   The client can be their own representative (the intake sheet's "same as the patient").
 - `assistanceCode` (program) is a code from `/api/lookups/assistance-programs`, Social Worker / admins only.
-  Releasing needs it, like the amount.
+  Sending for approval needs it, like the amount.
 - Money fields, program and release: only the social worker holding the claim, or an admin (403 otherwise:
   "Check out the claim first." or "{name} is handling this claim.").
 

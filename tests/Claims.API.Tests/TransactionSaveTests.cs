@@ -21,6 +21,7 @@ public class TransactionSaveTests
     public required HttpClient Worker { get; init; }
     public required HttpClient Worker2 { get; init; }
     public required HttpClient Admin { get; init; }
+    public required HttpClient Head { get; init; }
     public short LaneId { get; set; }
     public int PatientId { get; set; }
     public int CreditorId { get; set; }
@@ -34,6 +35,7 @@ public class TransactionSaveTests
       Worker.Dispose();
       Worker2.Dispose();
       Admin.Dispose();
+      Head.Dispose();
       await App.DisposeAsync();
     }
   }
@@ -46,6 +48,7 @@ public class TransactionSaveTests
     var workerId = await CreateUserAsync(app, "worker", Password, "Social Worker");
     await CreateUserAsync(app, "worker2", Password, "Social Worker");
     await CreateUserAsync(app, "admin", Password, "Administrator");
+    await CreateUserAsync(app, "head", Password, "Social Worker", "Approver");
     var office = new Office
     {
       App = app,
@@ -53,6 +56,7 @@ public class TransactionSaveTests
       Worker = await LoginAsAsync(app, "worker", Password),
       Worker2 = await LoginAsAsync(app, "worker2", Password),
       Admin = await LoginAsAsync(app, "admin", Password),
+      Head = await LoginAsAsync(app, "head", Password),
     };
 
     await using var db = app.CreateDbContext();
@@ -93,6 +97,22 @@ public class TransactionSaveTests
 
   private static Task<HttpResponseMessage> Save(HttpClient client, object body) =>
     client.PostAsJsonAsync("/api/transactions/save", body);
+
+  private static Task<HttpResponseMessage> Submit(HttpClient client, int id) =>
+    client.PostAsync($"/api/transactions/{id}/submit-for-approval", null);
+
+  private static Task<HttpResponseMessage> Approve(HttpClient client, int id) =>
+    client.PostAsync($"/api/transactions/{id}/approve", null);
+
+  // the whole way: worker sets it, sends it, the admin approves, the worker releases
+  private static async Task ReleaseAsync(Office o, int id, decimal amount = 100m)
+  {
+    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
+    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, amount, assistanceCode = "AICS" })).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await Submit(o.Worker, id)).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await Approve(o.Admin, id)).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await o.Worker.PostAsync($"/api/transactions/{id}/release", null)).StatusCode);
+  }
 
   private static async Task<List<TransactionHistoryDto>> History(Office o, int id) =>
     (await o.Admin.GetFromJsonAsync<List<TransactionHistoryDto>>($"/api/transactions/{id}/history"))!;
@@ -227,12 +247,7 @@ public class TransactionSaveTests
   {
     await using var o = await SetupAsync();
     var id = await CreateAsync(o);
-    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
-
-    var noAmount = await Save(o.Worker, new { transactionId = id, isReleased = true });
-    Assert.Equal(HttpStatusCode.BadRequest, noAmount.StatusCode);
-
-    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, amount = 3000m, isReleased = true, assistanceCode = "AICS" })).StatusCode);
+    await ReleaseAsync(o, id, 3000m);
 
     Assert.Equal(HttpStatusCode.Conflict, (await Save(o.Worker, new { transactionId = id, amount = 4000m })).StatusCode);
     Assert.Equal(HttpStatusCode.Conflict, (await Save(o.Worker, new { transactionId = id, isReleased = false })).StatusCode);
@@ -243,10 +258,15 @@ public class TransactionSaveTests
     Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, amount = 4000m })).StatusCode);
 
     var history = await History(o, id);
-    Assert.Equal(["Created", "CheckedOut", "Released", "Reopened", "Updated"], history.Select(h => h.Action));
+    Assert.Equal(["Created", "CheckedOut", "Updated", "SubmittedForApproval", "Approved", "Released", "Reopened", "Updated"],
+      history.Select(h => h.Action));
     Assert.Contains("3000", history[2].NewValues);
-    Assert.Contains("4000", history[4].NewValues);
-    Assert.Contains("3000", history[4].OldValues);
+    // reopened claims go through approval again
+    Assert.Contains("\"approvalStatusId\":1", history[6].NewValues);
+    Assert.Contains("4000", history[7].NewValues);
+    Assert.Contains("3000", history[7].OldValues);
+    var claim = await o.Worker.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{id}");
+    Assert.Equal((short)1, claim!.ApprovalStatusId);
   }
 
   [Fact]
@@ -489,19 +509,119 @@ public class TransactionSaveTests
   }
 
   [Fact]
-  public async Task Release_NeedsProgram()
+  public async Task Submit_NeedsProgramAmountAndBirthdate()
+  {
+    await using var o = await SetupAsync();
+    var noBirthdate = await PersonAsync(o, "NOBDAY");
+    var created = await Save(o.Front, new { date = "2026-11-10T09:00", laneTypeId = o.LaneId, patientPersonId = noBirthdate });
+    var id = (await created.Content.ReadFromJsonAsync<TransactionResponseDto>())!.TransactionId;
+    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
+
+    var noProgram = await Submit(o.Worker, id);
+    Assert.Equal(HttpStatusCode.BadRequest, noProgram.StatusCode);
+    Assert.Contains("Set the program before sending the claim for approval.", await noProgram.Content.ReadAsStringAsync());
+
+    await Save(o.Worker, new { transactionId = id, assistanceCode = "AICS" });
+    var noAmount = await Submit(o.Worker, id);
+    Assert.Equal(HttpStatusCode.BadRequest, noAmount.StatusCode);
+    Assert.Contains("Set the amount before sending the claim for approval.", await noAmount.Content.ReadAsStringAsync());
+
+    await Save(o.Worker, new { transactionId = id, amount = 100m });
+    var noBirth = await Submit(o.Worker, id);
+    Assert.Equal(HttpStatusCode.BadRequest, noBirth.StatusCode);
+    Assert.Contains("Set the client's birthdate or approximate age before sending the claim for approval.", await noBirth.Content.ReadAsStringAsync());
+
+    await using (var db = o.App.CreateDbContext())
+    {
+      var p = await db.People.FindAsync(noBirthdate);
+      p!.Birthdate = new DateOnly(1956, 1, 1);
+      p.BirthdateEstimated = true;
+      await db.SaveChangesAsync();
+    }
+    Assert.Equal(HttpStatusCode.OK, (await Submit(o.Worker, id)).StatusCode);
+    var claim = await o.Worker.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{id}");
+    Assert.Equal((short)2, claim!.ApprovalStatusId);
+  }
+
+  [Fact]
+  public async Task Submit_ApprovedClaimIsRefused()
   {
     await using var o = await SetupAsync();
     var id = await CreateAsync(o);
     await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
-    await Save(o.Worker, new { transactionId = id, amount = 100m });
+    await Save(o.Worker, new { transactionId = id, amount = 100m, assistanceCode = "AICS" });
+    await Submit(o.Worker, id);
+    Assert.Equal(HttpStatusCode.OK, (await Approve(o.Admin, id)).StatusCode);
 
-    var noProgram = await Save(o.Worker, new { transactionId = id, isReleased = true });
-    Assert.Equal(HttpStatusCode.BadRequest, noProgram.StatusCode);
-    Assert.Contains("Set the program before releasing the claim.", await noProgram.Content.ReadAsStringAsync());
+    var again = await Submit(o.Worker, id);
+    Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+    Assert.Contains("This claim is already approved.", await again.Content.ReadAsStringAsync());
+    var claim = await o.Worker.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{id}");
+    Assert.Equal((short)3, claim!.ApprovalStatusId);
+  }
 
-    var ok = await Save(o.Worker, new { transactionId = id, isReleased = true, assistanceCode = "AICS" });
-    Assert.Equal(HttpStatusCode.NoContent, ok.StatusCode);
+  [Fact]
+  public async Task Approve_RefusedForTheApproverWhoWorkedOnIt()
+  {
+    await using var o = await SetupAsync();
+    var id = await CreateAsync(o);
+    await o.Head.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
+    await Save(o.Head, new { transactionId = id, amount = 100m, assistanceCode = "AICS" });
+    Assert.Equal(HttpStatusCode.OK, (await Submit(o.Head, id)).StatusCode);
+
+    var own = await Approve(o.Head, id);
+    Assert.Equal(HttpStatusCode.Forbidden, own.StatusCode);
+    Assert.Contains("You worked on this claim, so another approver has to approve it.", await own.Content.ReadAsStringAsync());
+    Assert.Equal(HttpStatusCode.OK, (await Approve(o.Admin, id)).StatusCode);
+  }
+
+  [Fact]
+  public async Task Approve_RefusedWhenTheApproverSetTheAmountBeforeAHandover()
+  {
+    await using var o = await SetupAsync();
+    var id = await CreateAsync(o);
+    await o.Head.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
+    await Save(o.Head, new { transactionId = id, amount = 100m, assistanceCode = "AICS" });
+    Assert.Equal(HttpStatusCode.OK, (await o.Worker.PostAsJsonAsync($"/api/transactions/{id}/checkout-social-worker",
+      new { takeOver = true, reason = "head went to a meeting" })).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await Submit(o.Worker, id)).StatusCode);
+
+    Assert.Equal(HttpStatusCode.Forbidden, (await Approve(o.Head, id)).StatusCode);
+  }
+
+  [Fact]
+  public async Task Approve_AnApproverWhoNeverTouchedItCan()
+  {
+    await using var o = await SetupAsync();
+    var id = await CreateAsync(o);
+    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
+    await Save(o.Worker, new { transactionId = id, amount = 100m, assistanceCode = "AICS" });
+    await Submit(o.Worker, id);
+
+    Assert.Equal(HttpStatusCode.OK, (await Approve(o.Head, id)).StatusCode);
+  }
+
+  [Fact]
+  public async Task Save_LockedWhileWithTheApproversOrApproved()
+  {
+    await using var o = await SetupAsync();
+    var id = await CreateAsync(o);
+    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
+    await Save(o.Worker, new { transactionId = id, amount = 100m, assistanceCode = "AICS" });
+    await Submit(o.Worker, id);
+
+    var waiting = await Save(o.Worker, new { transactionId = id, amount = 200m });
+    Assert.Equal(HttpStatusCode.Conflict, waiting.StatusCode);
+    Assert.Contains("with the approvers", await waiting.Content.ReadAsStringAsync());
+    Assert.Equal(HttpStatusCode.Conflict, (await Save(o.Admin, new { transactionId = id, remarks = "late note" })).StatusCode);
+
+    await Approve(o.Admin, id);
+    var approved = await Save(o.Worker, new { transactionId = id, amount = 200m });
+    Assert.Equal(HttpStatusCode.Conflict, approved.StatusCode);
+    Assert.Contains("already approved", await approved.Content.ReadAsStringAsync());
+
+    var claim = await o.Worker.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{id}");
+    Assert.Equal(100m, claim!.Amount);
   }
 
   [Fact]
@@ -555,9 +675,7 @@ public class TransactionSaveTests
   {
     await using var o = await SetupAsync();
     var id = await CreateAsync(o);
-    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
-    Assert.Equal(HttpStatusCode.NoContent,
-      (await Save(o.Worker, new { transactionId = id, amount = 100m, assistanceCode = "AICS", isReleased = true })).StatusCode);
+    await ReleaseAsync(o, id);
 
     Assert.Equal(HttpStatusCode.Created, (await File(o)).StatusCode);
   }
@@ -590,40 +708,30 @@ public class TransactionSaveTests
   }
 
   [Fact]
-  public async Task Release_NeedsBirthdate_AnyClaim()
+  public async Task Save_CantRelease_EvenAnOldClaim()
   {
     await using var o = await SetupAsync();
-    var noBirthdate = await PersonAsync(o, "NOBDAY");
-    var created = await Save(o.Front, new { date = "2026-11-10T09:00", laneTypeId = o.LaneId, patientPersonId = noBirthdate });
-    var id = (await created.Content.ReadFromJsonAsync<TransactionResponseDto>())!.TransactionId;
+    var id = await CreateAsync(o);
     await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
 
     var refused = await Save(o.Worker, new { transactionId = id, amount = 100m, assistanceCode = "AICS", isReleased = true });
-    Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
-    Assert.Contains("Set the client's birthdate or approximate age before releasing.", await refused.Content.ReadAsStringAsync());
+    Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+    Assert.Contains("Send the claim for approval, then release it once it's approved.", await refused.Content.ReadAsStringAsync());
+    var claim = await o.Worker.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{id}");
+    Assert.NotEqual(true, claim!.IsReleased);
 
-    await using (var db = o.App.CreateDbContext())
-    {
-      var p = await db.People.FindAsync(noBirthdate);
-      p!.Birthdate = new DateOnly(1956, 1, 1);
-      p.BirthdateEstimated = true;
-      await db.SaveChangesAsync();
-    }
-    Assert.Equal(HttpStatusCode.NoContent,
-      (await Save(o.Worker, new { transactionId = id, amount = 100m, assistanceCode = "AICS", isReleased = true })).StatusCode);
-
-    // old-system claim, patient without a birthdate
-    var oldPatient = await PersonAsync(o, "OLDCLIENT");
+    // old-system claim
     int oldId;
     await using (var db = o.App.CreateDbContext())
     {
-      var old = new Transaction { PatientPersonId = oldPatient, LaneTypeId = o.LaneId, Date = new DateTime(2025, 3, 1), Amount = 500m, AssistanceCode = "AICS", Status = false };
+      var old = new Transaction { PatientPersonId = o.PatientId, LaneTypeId = o.LaneId, Date = new DateTime(2025, 3, 1), Amount = 500m, AssistanceCode = "AICS", Status = false };
       db.Transactions.Add(old);
       await db.SaveChangesAsync();
       oldId = old.TransactionId;
     }
     await o.Worker2.PostAsync($"/api/transactions/{oldId}/checkout-social-worker", null);
-    Assert.Equal(HttpStatusCode.BadRequest, (await Save(o.Worker2, new { transactionId = oldId, isReleased = true })).StatusCode);
+    Assert.Equal(HttpStatusCode.Conflict, (await Save(o.Worker2, new { transactionId = oldId, isReleased = true })).StatusCode);
+    Assert.Equal(HttpStatusCode.Conflict, (await Save(o.Admin, new { transactionId = oldId, isReleased = true })).StatusCode);
   }
 
   [Fact]
@@ -635,7 +743,12 @@ public class TransactionSaveTests
     var id = (await created.Content.ReadFromJsonAsync<TransactionResponseDto>())!.TransactionId;
     await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
     Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, amount = 100m, assistanceCode = "AICS" })).StatusCode);
-    Assert.Equal(HttpStatusCode.OK, (await o.Worker.PostAsync($"/api/transactions/{id}/submit-for-approval", null)).StatusCode);
+    // sent before sending needed a birthdate
+    await using (var db = o.App.CreateDbContext())
+    {
+      (await db.Transactions.FindAsync(id))!.ApprovalStatusId = 2;
+      await db.SaveChangesAsync();
+    }
     Assert.Equal(HttpStatusCode.OK, (await o.Admin.PostAsync($"/api/transactions/{id}/approve", null)).StatusCode);
 
     var refused = await o.Worker.PostAsync($"/api/transactions/{id}/release", null);

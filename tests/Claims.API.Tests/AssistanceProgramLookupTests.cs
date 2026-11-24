@@ -19,12 +19,7 @@ public class AssistanceProgramLookupTests
     await CreateUserAsync(app, "fl", Pw, "Frontliner");
     await using (var db = app.CreateDbContext())
     {
-      // Assistance has no key in the model, so it can only be seeded with SQL
-      await db.Database.ExecuteSqlRawAsync("""
-        INSERT INTO Assistance (AssistanceID, AssistanceCode, AssistanceType) VALUES
-          (1, 'C', 'IHF-MEDICAL'), (2, 'A', 'AICS'), (3, 'A', 'AICS'),
-          (4, 'c ', 'IHF-MEDICAL'), (5, NULL, 'NO CODE'), (6, 'Z', NULL)
-        """);
+      await db.AddProgramsAsync(("C", "IHF-MEDICAL"), ("A", "AICS"), ("A", "AICS"), ("c ", "IHF-MEDICAL"), (null, "NO CODE"), ("Z", null));
     }
     using var client = await LoginAsAsync(app, "fl", Pw);
 

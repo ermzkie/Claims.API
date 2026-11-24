@@ -36,10 +36,10 @@ public partial class FundSource
     [Column(TypeName = "datetime")]
     public DateTime? DateLastUpdated { get; set; }
 
+    [InverseProperty("FundSource")]
+    public virtual ICollection<ServiceFundAllocation> ServiceFundAllocations { get; set; } = new List<ServiceFundAllocation>();
+
     [ForeignKey("SourceId")]
     [InverseProperty("FundSources")]
     public virtual SourceOfAssistance? Source { get; set; }
-
-    [InverseProperty("FundSource")]
-    public virtual ICollection<Transaction> Transactions { get; set; } = new List<Transaction>();
 }

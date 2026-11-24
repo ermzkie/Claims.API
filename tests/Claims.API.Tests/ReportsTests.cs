@@ -35,10 +35,10 @@ public class ReportsTests
         var day = new DateTime(2025, 5, 2);
         db.Transactions.AddRange(
           // old system: Status 0 but never cancelled here
-          new Transaction { PatientPersonId = personId, Date = day, Amount = 1000m, AssistanceCode = "MED", Status = false },
-          new Transaction { PatientPersonId = personId, Date = day, Amount = 500m, AssistanceCode = "MED", Status = true, CreatedBy = userId },
+          new Transaction { PatientPersonId = personId, Date = day, AssistanceCode = "MED", Status = false }.WithMoney(amount: 1000m),
+          new Transaction { PatientPersonId = personId, Date = day, AssistanceCode = "MED", Status = true, CreatedBy = userId }.WithMoney(amount: 500m),
           // cancelled in this system
-          new Transaction { PatientPersonId = personId, Date = day, Amount = 900m, AssistanceCode = "MED", Status = false, CreatedBy = userId });
+          new Transaction { PatientPersonId = personId, Date = day, AssistanceCode = "MED", Status = false, CreatedBy = userId }.WithMoney(amount: 900m));
         await db.SaveChangesAsync();
       }
 
@@ -64,8 +64,8 @@ public class ReportsTests
       {
         db.Transactions.AddRange(Enumerable.Range(0, ReportsController.MaxReportRows + 1).Select(i => new Transaction
         {
-          PatientPersonId = personId, Date = new DateTime(2024, 1, 1).AddHours(i), Amount = 1m, Status = true,
-        }));
+          PatientPersonId = personId, Date = new DateTime(2024, 1, 1).AddHours(i), Status = true,
+        }.WithMoney(amount: 1m)));
         await db.SaveChangesAsync();
       }
 

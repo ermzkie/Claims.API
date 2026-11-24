@@ -38,10 +38,10 @@ public class FundSourceTests
       db.People.Add(new Person { PersonId = 10, LastName = "SANTOS", FirstName = "MARIA", MiddleName = "CRUZ", Status = true, DateCreated = new DateTime(2025, 1, 1) });
       db.Creditors.Add(new Creditor { CreditorId = 5, CreditorName = "MERCURY DRUG", Status = true });
       db.Transactions.AddRange(
-        new Transaction { TransactionId = 1, Status = true, Date = new DateTime(2026, 3, 1), FundSourceId = 1, PatientPersonId = 10, CreditorId = 5, Amount = 2500m, RefNo = " A-1 " },
-        new Transaction { TransactionId = 3, Status = true, Date = new DateTime(2026, 4, 1), FundSourceId = 1, Amount = 1000m },
+        new Transaction { TransactionId = 1, Status = true, Date = new DateTime(2026, 3, 1), PatientPersonId = 10, RefNo = " A-1 " }.WithMoney(fundSourceId: 1, creditorId: 5, amount: 2500m),
+        new Transaction { TransactionId = 3, Status = true, Date = new DateTime(2026, 4, 1), }.WithMoney(fundSourceId: 1, amount: 1000m),
         // deleted, but still points here
-        new Transaction { TransactionId = 2, Status = false, CreatedBy = adminId, Date = new DateTime(2026, 3, 2), FundSourceId = 1 });
+        new Transaction { TransactionId = 2, Status = false, CreatedBy = adminId, Date = new DateTime(2026, 3, 2), }.WithMoney(fundSourceId: 1));
       await db.SaveChangesAsync();
     }
     return (app, await LoginAsAsync(app, "admin", Pw));

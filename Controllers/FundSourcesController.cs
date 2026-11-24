@@ -55,30 +55,35 @@ public class FundSourcesController(
       return NotFound(new { message = "Fund source not found." });
     }
 
-    var rows = await context.Transactions.AsNoTracking()
-      .Where(t => t.FundSourceId == id && (t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)))
-      .OrderByDescending(t => t.Date).ThenByDescending(t => t.TransactionId)
+    var rows = await context.ServiceFundAllocations.AsNoTracking()
+      .Where(allocation => allocation.FundSourceId == id && allocation.Status
+        && (allocation.TranService.Transaction.Status
+          || (allocation.TranService.Transaction.CreatedBy == null
+            && allocation.TranService.Transaction.LastUpdatedBy == null)))
+      .OrderByDescending(allocation => allocation.TranService.Transaction.Date)
+      .ThenByDescending(allocation => allocation.TranService.TransactionId)
+      .ThenBy(allocation => allocation.ServiceFundAllocationId)
       .Take(take)
-      .Select(t => new
+      .Select(allocation => new
       {
-        t.TransactionId,
-        t.RefNo,
-        t.Date,
-        t.PatientPersonId,
-        t.PatientPerson!.LastName,
-        t.PatientPerson.FirstName,
-        t.PatientPerson.MiddleName,
-        t.AssistanceCode,
-        t.CreditorId,
-        t.Creditor!.CreditorName,
-        t.Amount,
-        t.IsReleased,
+        allocation.TranService.Transaction.TransactionId,
+        allocation.TranService.Transaction.RefNo,
+        allocation.TranService.Transaction.Date,
+        allocation.TranService.Transaction.PatientPersonId,
+        allocation.TranService.Transaction.PatientPerson!.LastName,
+        allocation.TranService.Transaction.PatientPerson.FirstName,
+        allocation.TranService.Transaction.PatientPerson.MiddleName,
+        allocation.TranService.Transaction.AssistanceCode,
+        allocation.CreditorId,
+        CreditorName = allocation.Creditor != null ? allocation.Creditor.CreditorName : null,
+        allocation.Amount,
+        allocation.TranService.Transaction.IsReleased,
       })
       .ToListAsync();
 
-    var programs = (await context.Assistances.AsNoTracking()
-        .Where(a => a.AssistanceCode != null)
-        .Select(a => new { a.AssistanceCode, a.AssistanceType })
+    var programs = (await context.SourceOfAssistances.AsNoTracking()
+        .Where(source => source.SourceCode != null)
+        .Select(source => new { AssistanceCode = source.SourceCode, AssistanceType = source.SourceDesc })
         .ToListAsync())
       .GroupBy(a => a.AssistanceCode!.Trim().ToUpperInvariant())
       .ToDictionary(g => g.Key, g => g.First().AssistanceType);
@@ -197,7 +202,11 @@ public class FundSourcesController(
   }
 
   // deleted claims still point at the row
-  private Task<int> ClaimsAsync(int id) => context.Transactions.CountAsync(t => t.FundSourceId == id);
+  private Task<int> ClaimsAsync(int id) => context.ServiceFundAllocations.AsNoTracking()
+    .Where(allocation => allocation.FundSourceId == id)
+    .Select(allocation => allocation.TranService.TransactionId)
+    .Distinct()
+    .CountAsync();
 
   private async Task<(ActionResult? Error, FinanceAccountDto? Account)> ApplyAsync(FundSource fund, SaveFundSourceDto dto)
   {
@@ -278,8 +287,20 @@ public class FundSourcesController(
         Program = f.Source!.SourceDesc,
         f.AppropriationId,
         f.TrustFundId,
-        Claims = f.Transactions.Count(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)),
-        ClaimsAmount = f.Transactions.Where(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null)).Sum(t => t.Amount) ?? 0,
+        Claims = f.ServiceFundAllocations
+          .Where(allocation => allocation.Status
+            && (allocation.TranService.Transaction.Status
+              || (allocation.TranService.Transaction.CreatedBy == null
+                && allocation.TranService.Transaction.LastUpdatedBy == null)))
+          .Select(allocation => allocation.TranService.TransactionId)
+          .Distinct()
+          .Count(),
+        ClaimsAmount = f.ServiceFundAllocations
+          .Where(allocation => allocation.Status
+            && (allocation.TranService.Transaction.Status
+              || (allocation.TranService.Transaction.CreatedBy == null
+                && allocation.TranService.Transaction.LastUpdatedBy == null)))
+          .Sum(allocation => allocation.Amount) ?? 0,
         f.DateCreated,
         f.CreatedBy,
         f.DateLastUpdated,

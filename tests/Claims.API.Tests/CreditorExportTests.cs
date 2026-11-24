@@ -25,15 +25,13 @@ public class CreditorExportTests
         new Person { PersonId = 10, LastName = "PEÑA", FirstName = "MARIA", Status = true },
         new Person { PersonId = 11, LastName = "=HYPERLINK(\"x\")", FirstName = "BAD, \"NAME\"", Status = true });
       db.Transactions.AddRange(
-        new Transaction { TransactionId = 1, CreditorId = 1, Status = true, Amount = 1000.5m, Date = new DateTime(2026, 10, 5), RefNo = "A-1", PatientPersonId = 10, AssistanceCode = "A" },
-        new Transaction { TransactionId = 2, CreditorId = 1, Status = true, Amount = 250m, Date = new DateTime(2026, 10, 20), RefNo = "C-2", PatientPersonId = 11, AssistanceCode = "C" },
-        new Transaction { TransactionId = 3, CreditorId = 1, Status = false, Amount = 75m, Date = new DateTime(2026, 11, 2), RefNo = "OLD-3" },
-        new Transaction { TransactionId = 4, CreditorId = 1, Status = false, Amount = 9999m, Date = new DateTime(2026, 11, 3), RefNo = "DELETED", CreatedBy = userId },
-        new Transaction { TransactionId = 5, CreditorId = 1, Status = true, Amount = 40m, Date = new DateTime(2025, 1, 1), RefNo = "A-5", AssistanceCode = "A" });
+        new Transaction { TransactionId = 1, Status = true, Date = new DateTime(2026, 10, 5), RefNo = "A-1", PatientPersonId = 10, AssistanceCode = "A" }.WithMoney(creditorId: 1, amount: 1000.5m).Released(),
+        new Transaction { TransactionId = 2, Status = true, Date = new DateTime(2026, 10, 20), RefNo = "C-2", PatientPersonId = 11, AssistanceCode = "C" }.WithMoney(creditorId: 1, amount: 250m).Released(),
+        new Transaction { TransactionId = 3, Status = false, Date = new DateTime(2026, 11, 2), RefNo = "OLD-3" }.WithMoney(creditorId: 1, amount: 75m).Released(),
+        new Transaction { TransactionId = 4, Status = false, Date = new DateTime(2026, 11, 3), RefNo = "DELETED", CreatedBy = userId }.WithMoney(creditorId: 1, amount: 9999m),
+        new Transaction { TransactionId = 5, Status = true, Date = new DateTime(2025, 1, 1), RefNo = "A-5", AssistanceCode = "A" }.WithMoney(creditorId: 1, amount: 40m).Released());
       await db.SaveChangesAsync();
-      // Assistance has no key in the model, so it can only be seeded with SQL
-      await db.Database.ExecuteSqlRawAsync(
-        "INSERT INTO Assistance (AssistanceID, AssistanceCode, AssistanceType) VALUES (1, 'A', 'AICS'), (2, 'C', 'IHF-MEDICAL')");
+      await db.AddProgramsAsync(("A", "AICS"), ("C", "IHF-MEDICAL"));
     }
     return (app, await LoginAsAsync(app, "fl", Pw));
   }

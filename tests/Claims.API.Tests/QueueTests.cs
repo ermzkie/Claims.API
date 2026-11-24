@@ -64,8 +64,7 @@ public class QueueTests
     var patient = new Person { FirstName = "MARIA", MiddleName = "CRUZ", LastName = "SANTOS", Status = true, Birthdate = new DateOnly(1958, 3, 1) };
     db.AddRange(r, s, v, patient);
     await db.SaveChangesAsync();
-    // keyless table
-    await db.Database.ExecuteSqlRawAsync("INSERT INTO Assistance (AssistanceID, AssistanceCode, AssistanceType) VALUES (1, 'AICS', 'AICS')");
+    await db.AddProgramsAsync(("AICS", "AICS"));
     office.R = r.LaneTypeId;
     office.S = s.LaneTypeId;
     office.V = v.LaneTypeId;

@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using Claims.API.DTOs.Creditor;
 using Claims.API.Models;
@@ -20,48 +21,45 @@ public class CreditorLegacyClaimsTests
     {
       db.Creditors.Add(new Creditor { CreditorId = 1, CreditorName = "HOSPITAL A", Status = true });
       db.Transactions.AddRange(
-        new Transaction { TransactionId = 1, CreditorId = 1, Status = false, IsReleased = false, Amount = 100m, Date = new DateTime(2022, 5, 1), RefNo = "OLD-2022" },
-        new Transaction { TransactionId = 2, CreditorId = 1, Status = false, Amount = 40m, Date = null, RefNo = "OLD-NODATE" },
-        new Transaction { TransactionId = 3, CreditorId = 1, Status = true, IsReleased = false, Amount = 10m, Date = new DateTime(2026, 11, 1), RefNo = "NEW", CreatedBy = userId },
-        new Transaction { TransactionId = 4, CreditorId = 1, Status = false, Amount = 5000m, Date = new DateTime(2026, 11, 2), RefNo = "NEW-DELETED", CreatedBy = userId });
+        // old claims came over approved and released, Status 0 included
+        new Transaction { TransactionId = 1, Status = false, Date = new DateTime(2022, 5, 1), RefNo = "OLD-2022" }.WithMoney(creditorId: 1, amount: 100m).Released(),
+        new Transaction { TransactionId = 2, Status = false, Date = null, RefNo = "OLD-NODATE" }.WithMoney(creditorId: 1, amount: 40m).Released(),
+        new Transaction { TransactionId = 3, Status = true, IsReleased = false, Date = new DateTime(2026, 11, 1), RefNo = "NEW", CreatedBy = userId }.WithMoney(creditorId: 1, amount: 10m),
+        new Transaction { TransactionId = 4, Status = false, Date = new DateTime(2026, 11, 2), RefNo = "NEW-DELETED", CreatedBy = userId }.WithMoney(creditorId: 1, amount: 5000m));
       await db.SaveChangesAsync();
     }
     return (app, await LoginAsAsync(app, "fl", Pw));
   }
 
   [Fact]
-  public async Task OldSystemClaimsWithStatusFalse_Count_NewSystemDeletionsDoNot()
+  public async Task OldSystemClaims_Count_UnreleasedAndDeletedDoNot()
   {
     var (app, client) = await StartAsync();
     await using var _ = app;
 
     var totals = (await client.GetFromJsonAsync<List<CreditorTotalsDto>>("/api/creditor/summary"))!.Single();
-    Assert.Equal(3, totals.Claims);
-    Assert.Equal(150m, totals.Amount);
-    Assert.Equal(4, totals.AllClaims);
+    Assert.Equal(2, totals.Claims);
+    Assert.Equal(140m, totals.Amount);
 
     var summary = await client.GetFromJsonAsync<CreditorSummaryDto>("/api/creditor/1/summary");
-    Assert.Equal([new CreditorYearDto(2026, 1, 10m), new CreditorYearDto(2022, 1, 100m)], summary!.ByYear);
+    Assert.Equal([new CreditorYearDto(2022, 1, 100m)], summary!.ByYear);
     Assert.Equal(1, summary.ClaimsWithoutDate);
 
     var page = await client.GetFromJsonAsync<CreditorClaimsPageDto>("/api/creditor/1/claims");
-    Assert.Equal(["NEW", "OLD-2022", "OLD-NODATE"], page!.Data.Select(c => c.RefNo));
+    Assert.Equal(["OLD-2022", "OLD-NODATE"], page!.Data.Select(c => c.RefNo));
   }
 
   [Fact]
-  public async Task Release_IsUnknownOnOldSystemClaims()
+  public async Task OldSystemClaims_ShowAsReleased_OthersAreNotTheCreditors()
   {
     var (app, client) = await StartAsync();
     await using var _ = app;
 
     var old = await client.GetFromJsonAsync<CreditorClaimDetailDto>("/api/creditor/1/claims/1");
-    Assert.Null(old!.IsReleased);
+    Assert.True(old!.IsReleased);
     Assert.True(old.IsActive);
 
-    var recent = await client.GetFromJsonAsync<CreditorClaimDetailDto>("/api/creditor/1/claims/3");
-    Assert.False(recent!.IsReleased);
-
-    var deleted = await client.GetFromJsonAsync<CreditorClaimDetailDto>("/api/creditor/1/claims/4");
-    Assert.False(deleted!.IsActive);
+    Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/creditor/1/claims/3")).StatusCode);
+    Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/creditor/1/claims/4")).StatusCode);
   }
 }

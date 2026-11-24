@@ -56,7 +56,7 @@ public class TransactionTests
 
     await using (var db = app.CreateDbContext())
     {
-      await db.Database.ExecuteSqlRawAsync("INSERT INTO Assistance (AssistanceID, AssistanceCode, AssistanceType) VALUES (1, 'AICS', 'AICS')");
+      await db.AddProgramsAsync(("AICS", "AICS"));
     }
     await worker.PostAsync($"/api/transactions/{transactionId}/checkout-social-worker", null);
 
@@ -495,11 +495,11 @@ public class TransactionTests
       // only the worker holding the claim (or an admin) can send it; program, amount and birthdate are set
       var client = new Person { FirstName = "MARIA", LastName = "SANTOS", Status = true, Birthdate = new DateOnly(1958, 3, 1) };
       var workerTransaction = new Transaction
-        { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = workerId, PatientPerson = client, Amount = 100m, AssistanceCode = "AICS" };
+        { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = workerId, PatientPerson = client, AssistanceCode = "AICS" }.WithMoney(amount: 100m);
       var adminTransaction = new Transaction
-        { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = existingWorkerId, PatientPerson = client, Amount = 100m, AssistanceCode = "AICS" };
+        { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = existingWorkerId, PatientPerson = client, AssistanceCode = "AICS" }.WithMoney(amount: 100m);
       var forbiddenTransaction = new Transaction
-        { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = existingWorkerId, PatientPerson = client, Amount = 100m, AssistanceCode = "AICS" };
+        { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = existingWorkerId, PatientPerson = client, AssistanceCode = "AICS" }.WithMoney(amount: 100m);
       db.Transactions.AddRange(workerTransaction, adminTransaction, forbiddenTransaction);
       await db.SaveChangesAsync();
       workerTransactionId = workerTransaction.TransactionId;

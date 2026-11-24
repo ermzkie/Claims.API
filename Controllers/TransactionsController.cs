@@ -24,10 +24,11 @@ public class TransactionsController(
   private const int MaxPageSize = 100;
   private const int MaxReason = 500;
   private static readonly JsonSerializerOptions LogJson = new(JsonSerializerDefaults.Web);
+  private static readonly string[] AllocationFields = ["fundSourceId", "creditorId", "modeId", "amount"];
 
   // fields only social workers and admins may change
   private static readonly string[] MoneyFields =
-    ["fundSourceId", "creditorId", "modeId", "amount", "socialWorkerAssessment", "isReleased", "assistanceCode"];
+    [.. AllocationFields, "socialWorkerAssessment", "isReleased", "assistanceCode"];
     
 
   private bool IsAdmin =>
@@ -319,6 +320,7 @@ public class TransactionsController(
     var transaction = dto.TransactionId.HasValue
       ? await context.Transactions
         .Include(x => x.TransactionServices)
+          .ThenInclude(service => service.ServiceFundAllocations)
         .FirstOrDefaultAsync(x => x.TransactionId == dto.TransactionId.Value, cancellationToken)
       : null;
     if (dto.TransactionId.HasValue && transaction is null)
@@ -331,7 +333,14 @@ public class TransactionsController(
     if (transaction is not null && ClaimRules.IsCancelled(transaction))
       return Conflict(new { message = "This claim was cancelled. An admin can restore it." });
 
-    var before = transaction is null ? new Dictionary<string, object?>() : Snapshot(transaction);
+    var currentAllocation = transaction?.TransactionServices
+      .SelectMany(service => service.ServiceFundAllocations)
+      .Where(allocation => allocation.Status)
+      .OrderBy(allocation => allocation.ServiceFundAllocationId)
+      .FirstOrDefault();
+    var before = transaction is null
+      ? new Dictionary<string, object?>()
+      : Snapshot(transaction, currentAllocation);
     var wasReleased = transaction?.IsReleased == true;
 
     // dates are PH time; a page using toISOString() sends UTC
@@ -346,14 +355,17 @@ public class TransactionsController(
       PatientPersonId = dto.PatientPersonId ?? transaction?.PatientPersonId,
       RepresentativePersonId = dto.ClearRepresentative ? null : dto.RepresentativePersonId ?? transaction?.RepresentativePersonId,
       Representative = dto.ClearRepresentative ? null : transaction?.Representative,
-      FundSourceId = dto.FundSourceId ?? transaction?.FundSourceId,
-      CreditorId = dto.CreditorId ?? transaction?.CreditorId,
-      ModeId = dto.ModeId ?? transaction?.ModeId,
-      Amount = dto.Amount ?? transaction?.Amount,
       SocialWorkerAssessment = Text(dto.SocialWorkerAssessment, transaction?.SocialWorkerAssessment),
       Remarks = Text(dto.Remarks, transaction?.Remarks),
       IsReleased = dto.IsReleased ?? transaction?.IsReleased ?? false,
       AssistanceCode = Text(dto.AssistanceCode, transaction?.AssistanceCode)?.ToUpperInvariant(),
+    };
+    var nextAllocation = new ServiceFundAllocation
+    {
+      FundSourceId = dto.FundSourceId ?? currentAllocation?.FundSourceId,
+      CreditorId = dto.CreditorId ?? currentAllocation?.CreditorId,
+      ModeId = dto.ModeId ?? currentAllocation?.ModeId,
+      Amount = dto.Amount ?? currentAllocation?.Amount,
     };
     var natureIds = dto.NatureIds?.Distinct().OrderBy(n => n).ToList()
       ?? transaction?.TransactionServices.Where(s => s.NatureId.HasValue)
@@ -362,7 +374,7 @@ public class TransactionsController(
     foreach (var nature in natureIds)
       next.TransactionServices.Add(new TransactionService { NatureId = nature });
 
-    var after = Snapshot(next);
+    var after = Snapshot(next, nextAllocation);
     var changed = after.Keys
       .Where(k => !Equals(before.GetValueOrDefault(k), after[k]))
       .ToList();
@@ -401,7 +413,7 @@ public class TransactionsController(
       });
     }
 
-    var problem = await ValidateAsync(next, natureIds, transaction, changed, cancellationToken);
+    var problem = await ValidateAsync(next, nextAllocation, natureIds, transaction, changed, cancellationToken);
     if (problem is not null)
       return BadRequest(new { message = problem });
 
@@ -473,10 +485,6 @@ public class TransactionsController(
     transaction.PatientPersonId = next.PatientPersonId;
     transaction.RepresentativePersonId = next.RepresentativePersonId;
     transaction.Representative = next.Representative;
-    transaction.FundSourceId = next.FundSourceId;
-    transaction.CreditorId = next.CreditorId;
-    transaction.ModeId = next.ModeId;
-    transaction.Amount = next.Amount;
     transaction.SocialWorkerAssessment = next.SocialWorkerAssessment;
     transaction.Remarks = next.Remarks;
     transaction.IsReleased = next.IsReleased;
@@ -489,10 +497,50 @@ public class TransactionsController(
       {
         if (service.NatureId.HasValue && wanted.Remove(service.NatureId.Value))
           continue;
+        if (service.ServiceFundAllocations.Count > 0)
+        {
+          service.NatureId = null;
+          continue;
+        }
         context.TransactionServices.Remove(service);
       }
       foreach (var natureId in wanted)
         transaction.TransactionServices.Add(new TransactionService { NatureId = natureId });
+    }
+
+    if (changed.Any(AllocationFields.Contains))
+    {
+      var allocation = currentAllocation;
+      if (allocation is null && HasAllocationValues(nextAllocation))
+      {
+        var service = transaction.TransactionServices.FirstOrDefault();
+        if (service is null)
+        {
+          service = new TransactionService();
+          transaction.TransactionServices.Add(service);
+        }
+
+        allocation = new ServiceFundAllocation
+        {
+          Status = true,
+          CreatedBy = currentUser.Id,
+          DateCreated = now,
+        };
+        service.ServiceFundAllocations.Add(allocation);
+      }
+
+      if (allocation is not null)
+      {
+        allocation.FundSourceId = nextAllocation.FundSourceId;
+        allocation.CreditorId = nextAllocation.CreditorId;
+        allocation.ModeId = nextAllocation.ModeId;
+        allocation.Amount = nextAllocation.Amount;
+        if (currentAllocation is not null)
+        {
+          allocation.LastUpdatedBy = currentUser.Id;
+          allocation.DateLastUpdated = now;
+        }
+      }
     }
 
     if (!await TrySaveAsync(cancellationToken))
@@ -845,7 +893,11 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
   }
 
   private async Task<string?> ValidateAsync(
-    Transaction next, List<short> natureIds, Transaction? current, List<string> changed,
+    Transaction next,
+    ServiceFundAllocation nextAllocation,
+    List<short> natureIds,
+    Transaction? current,
+    List<string> changed,
     CancellationToken ct)
   {
     bool Changed(string key) => current is null || changed.Contains(key);
@@ -868,17 +920,17 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
         && !await context.People.AnyAsync(x => x.PersonId == next.RepresentativePersonId && x.Status, ct))
       return "Representative was not found.";
 
-    if (next.CreditorId is not null && Changed("creditorId")
-        && !await context.Creditors.AnyAsync(x => x.CreditorId == next.CreditorId && x.Status, ct))
+    if (nextAllocation.CreditorId is not null && Changed("creditorId")
+        && !await context.Creditors.AnyAsync(x => x.CreditorId == nextAllocation.CreditorId && x.Status, ct))
       return "Creditor was not found.";
-    if (next.ModeId is not null && Changed("modeId")
-        && !await context.ModeOfAssistances.AnyAsync(x => x.ModeId == next.ModeId, ct))
+    if (nextAllocation.ModeId is not null && Changed("modeId")
+        && !await context.ModeOfAssistances.AnyAsync(x => x.ModeId == nextAllocation.ModeId, ct))
       return "Mode of assistance was not found.";
 
-    if (next.FundSourceId is not null && (Changed("fundSourceId") || Changed("date")))
+    if (nextAllocation.FundSourceId is not null && (Changed("fundSourceId") || Changed("date")))
     {
       var fund = await context.FundSources.AsNoTracking()
-        .Where(x => x.FundSourceId == next.FundSourceId && x.Status)
+        .Where(x => x.FundSourceId == nextAllocation.FundSourceId && x.Status)
         .Select(x => new { x.Year })
         .FirstOrDefaultAsync(ct);
       if (fund is null)
@@ -887,22 +939,23 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
         return $"That fund source is for {fund.Year}, the claim is dated {next.Date.Value.Year}.";
     }
 
-    if (next.Amount is not null && Changed("amount"))
+    if (nextAllocation.Amount is not null && Changed("amount"))
     {
-      if (next.Amount <= 0)
+      if (nextAllocation.Amount <= 0)
         return "Amount must be more than zero.";
-      if (decimal.Round(next.Amount.Value, 2) != next.Amount)
+      if (decimal.Round(nextAllocation.Amount.Value, 2) != nextAllocation.Amount)
         return "Amount can only have centavos (2 decimals).";
     }
 
     if (next.AssistanceCode is not null && Changed("assistanceCode"))
     {
       var code = next.AssistanceCode;
-      if (!await context.Assistances.AnyAsync(x => x.AssistanceCode != null && x.AssistanceCode.Trim().ToUpper() == code, ct))
+      // programs are SourceOfAssistance codes now, the Assistance table is gone
+      if (!await context.SourceOfAssistances.AnyAsync(x => x.SourceCode != null && x.SourceCode.Trim().ToUpper() == code, ct))
         return "Program was not found.";
     }
 
-    if (next.IsReleased == true && current?.IsReleased != true && next.Amount is null)
+    if (next.IsReleased == true && current?.IsReleased != true && nextAllocation.Amount is null)
       return "Set the amount before releasing the claim.";
     if (next.IsReleased == true && current?.IsReleased != true && next.AssistanceCode is null)
       return "Set the program before releasing the claim.";
@@ -920,17 +973,17 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
     return null;
   }
 
-  private static Dictionary<string, object?> Snapshot(Transaction t) => new()
+  private static Dictionary<string, object?> Snapshot(Transaction t, ServiceFundAllocation? allocation) => new()
   {
     ["date"] = t.Date,
     ["laneTypeId"] = t.LaneTypeId,
     ["patientPersonId"] = t.PatientPersonId,
     ["representativePersonId"] = t.RepresentativePersonId,
     ["representative"] = Text(t.Representative, null),
-    ["fundSourceId"] = t.FundSourceId,
-    ["creditorId"] = t.CreditorId,
-    ["modeId"] = t.ModeId,
-    ["amount"] = t.Amount,
+    ["fundSourceId"] = allocation?.FundSourceId,
+    ["creditorId"] = allocation?.CreditorId,
+    ["modeId"] = allocation?.ModeId,
+    ["amount"] = allocation?.Amount,
     ["socialWorkerAssessment"] = Text(t.SocialWorkerAssessment, null),
     ["remarks"] = Text(t.Remarks, null),
     ["isReleased"] = t.IsReleased,
@@ -938,6 +991,12 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
     ["natureIds"] = string.Join(",", t.TransactionServices
       .Where(s => s.NatureId.HasValue).Select(s => s.NatureId!.Value).OrderBy(n => n)),
   };
+
+  private static bool HasAllocationValues(ServiceFundAllocation allocation) =>
+    allocation.FundSourceId is not null
+    || allocation.CreditorId is not null
+    || allocation.ModeId is not null
+    || allocation.Amount is not null;
 
   private async Task<bool> TrySaveAsync(CancellationToken ct)
   {
@@ -993,14 +1052,19 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
 
   private static IQueryable<Transaction> WithDetails(IQueryable<Transaction> query) => query
     .Include(x => x.TransactionServices)
+      .ThenInclude(service => service.ServiceFundAllocations)
+        .ThenInclude(allocation => allocation.FundSource)
+          .ThenInclude(fundSource => fundSource!.Source)
+    .Include(x => x.TransactionServices)
+      .ThenInclude(service => service.ServiceFundAllocations)
+        .ThenInclude(allocation => allocation.Creditor)
+    .Include(x => x.TransactionServices)
+      .ThenInclude(service => service.ServiceFundAllocations)
+        .ThenInclude(allocation => allocation.Mode)
     .Include(x => x.PatientPerson)
     .Include(x => x.RepresentativePerson)
     .Include(x => x.SocialWorkerUser)
-    .Include(x => x.LaneType)
-    .Include(x => x.Creditor)
-    .Include(x => x.Mode)
-    .Include(x => x.FundSource)
-      .ThenInclude(x => x!.Source);
+    .Include(x => x.LaneType);
 
   private Task<Transaction?> LoadAsync(int id, CancellationToken ct, bool tracking = false)
   {

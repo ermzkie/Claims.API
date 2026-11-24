@@ -135,7 +135,7 @@ public class ReferenceDataService(ApplicationDbContext db)
     new Lookup<ModeOfAssistance>("modes-of-assistance", "Modes of assistance", hasCode: false, numberedByHand: false,
       d => d.ModeOfAssistances, r => r.ModeId, (_, _) => { },
       _ => null, r => r.ModeDesc, (r, _, n) => r.ModeDesc = n,
-      (d, v) => d.Transactions.CountAsync(t => t.ModeId == v)),
+      (d, v) => d.ServiceFundAllocations.CountAsync(allocation => allocation.ModeId == v)),
   ];
 
   private static ILookup? Find(string key) => Lookups.FirstOrDefault(l => l.Info.Key == key);

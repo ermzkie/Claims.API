@@ -6,6 +6,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Claims.API.Models;
 
+[Index("ApprovalStatusId", Name = "IX_Transactions_ApprovalStatusID")]
+[Index("RefNo", Name = "IX_Transactions_RefNo")]
 [Index("SocialWorkerUserId", Name = "IX_Transactions_SocialWorkerUserID")]
 public partial class Transaction
 {
@@ -29,6 +31,10 @@ public partial class Transaction
     [Column(TypeName = "datetime")]
     public DateTime? Date { get; set; }
 
+    [StringLength(150)]
+    [Unicode(false)]
+    public string? DateTemp { get; set; }
+
     [Column("PatientPersonID")]
     public int? PatientPersonId { get; set; }
 
@@ -37,18 +43,6 @@ public partial class Transaction
 
     [Unicode(false)]
     public string? Representative { get; set; }
-
-    [Column("FundSourceID")]
-    public int? FundSourceId { get; set; }
-
-    [Column("CreditorID")]
-    public int? CreditorId { get; set; }
-
-    [Column("ModeID")]
-    public short? ModeId { get; set; }
-
-    [Column(TypeName = "decimal(18, 2)")]
-    public decimal? Amount { get; set; }
 
     [Column("SocialWorkerID")]
     [StringLength(50)]
@@ -99,21 +93,9 @@ public partial class Transaction
     [InverseProperty("TransactionApprovedByNavigations")]
     public virtual User? ApprovedByNavigation { get; set; }
 
-    [ForeignKey("CreditorId")]
-    [InverseProperty("Transactions")]
-    public virtual Creditor? Creditor { get; set; }
-
-    [ForeignKey("FundSourceId")]
-    [InverseProperty("Transactions")]
-    public virtual FundSource? FundSource { get; set; }
-
     [ForeignKey("LaneTypeId")]
     [InverseProperty("Transactions")]
     public virtual LaneType? LaneType { get; set; }
-
-    [ForeignKey("ModeId")]
-    [InverseProperty("Transactions")]
-    public virtual ModeOfAssistance? Mode { get; set; }
 
     [ForeignKey("PatientPersonId")]
     [InverseProperty("TransactionPatientPeople")]

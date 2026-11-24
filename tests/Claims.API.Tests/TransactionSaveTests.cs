@@ -67,8 +67,7 @@ public class TransactionSaveTests
     var lastYear = new FundSource { FundSourceId = 602, Year = 2025, Status = true };
     db.AddRange(lane, patient, creditor, removed, fund, lastYear);
     await db.SaveChangesAsync();
-    // keyless table
-    await db.Database.ExecuteSqlRawAsync("INSERT INTO Assistance (AssistanceID, AssistanceCode, AssistanceType) VALUES (1, 'AICS', 'AICS')");
+    await db.AddProgramsAsync(("AICS", "AICS"));
     office.LaneId = lane.LaneTypeId;
     office.PatientId = patient.PersonId;
     office.CreditorId = creditor.CreditorId;
@@ -382,14 +381,14 @@ public class TransactionSaveTests
   }
 
   [Fact]
-  public async Task CancellingAnOldSystemClaim_RemovesItFromTheTotals()
+  public async Task OldSystemClaim_CountsAndCantBeCancelled()
   {
     await using var o = await SetupAsync();
     int id;
     await using (var db = o.App.CreateDbContext())
     {
-      // old system: no CreatedBy, and Status 0 still counts
-      var old = new Transaction { CreditorId = o.CreditorId, Amount = 1000m, Date = new DateTime(2023, 5, 1), Status = false };
+      // old system: no CreatedBy, Status 0, came over approved and released
+      var old = new Transaction { Date = new DateTime(2023, 5, 1), Status = false }.WithMoney(creditorId: o.CreditorId, amount: 1000m).Released();
       db.Transactions.Add(old);
       await db.SaveChangesAsync();
       id = old.TransactionId;
@@ -399,9 +398,9 @@ public class TransactionSaveTests
       (await o.Admin.GetFromJsonAsync<CreditorSummaryDto>($"/api/creditor/{o.CreditorId}/summary"))!.Claims;
 
     Assert.Equal(1, await Claims());
-    Assert.Equal(HttpStatusCode.NoContent,
+    Assert.Equal(HttpStatusCode.Conflict,
       (await o.Admin.PostAsJsonAsync($"/api/transactions/{id}/cancel", new { reason = "wrong creditor" })).StatusCode);
-    Assert.Equal(0, await Claims());
+    Assert.Equal(1, await Claims());
   }
 
   [Fact]
@@ -415,11 +414,11 @@ public class TransactionSaveTests
     var a = await first.Transactions.SingleAsync(t => t.TransactionId == id);
     var b = await second.Transactions.SingleAsync(t => t.TransactionId == id);
 
-    a.Amount = 100m;
+    a.Remarks = "first";
     a.DateLastUpdated = new DateTime(2026, 11, 10, 9, 0, 1);
     await first.SaveChangesAsync();
 
-    b.Amount = 200m;
+    b.Remarks = "second";
     b.DateLastUpdated = new DateTime(2026, 11, 10, 9, 0, 2);
     await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => second.SaveChangesAsync());
   }
@@ -617,7 +616,7 @@ public class TransactionSaveTests
     int oldId;
     await using (var db = o.App.CreateDbContext())
     {
-      var old = new Transaction { PatientPersonId = oldPatient, LaneTypeId = o.LaneId, Date = new DateTime(2025, 3, 1), Amount = 500m, AssistanceCode = "AICS", Status = false };
+      var old = new Transaction { PatientPersonId = oldPatient, LaneTypeId = o.LaneId, Date = new DateTime(2025, 3, 1), AssistanceCode = "AICS", Status = false }.WithMoney(amount: 500m);
       db.Transactions.Add(old);
       await db.SaveChangesAsync();
       oldId = old.TransactionId;

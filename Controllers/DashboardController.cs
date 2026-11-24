@@ -29,20 +29,21 @@ public class DashboardController(ApplicationDbContext context, TimeProvider time
     var end = start.AddMonths(1);
     var previous = start.AddMonths(-1);
 
-    var claims = CountedClaims();
-    var inMonth = claims.Where(t => t.Date >= start && t.Date < end);
-    var inPrevious = claims.Where(t => t.Date >= previous && t.Date < start);
-    var inYear = claims.Where(t => t.Date >= new DateTime(start.Year, 1, 1) && t.Date < end);
+    var claims = CountedClaimsWithAmounts();
+    var inMonth = claims.Where(claim => claim.Transaction.Date >= start && claim.Transaction.Date < end);
+    var inPrevious = claims.Where(claim => claim.Transaction.Date >= previous && claim.Transaction.Date < start);
+    var inYear = claims.Where(claim =>
+      claim.Transaction.Date >= new DateTime(start.Year, 1, 1) && claim.Transaction.Date < end);
     // old-system claims have no release status, so only claims made here can be waiting
-    var waiting = context.Transactions.AsNoTracking()
-      .Where(t => t.Status && t.CreatedBy != null && t.IsReleased != true);
+    var waiting = CountedClaimsWithAmounts()
+      .Where(claim => claim.Transaction.Status && claim.Transaction.CreatedBy != null && claim.Transaction.IsReleased != true);
 
     var programs = await ProgramNamesAsync();
 
     var byProgram = (await inMonth
-        .Where(t => t.AssistanceCode != null)
-        .GroupBy(t => t.AssistanceCode!)
-        .Select(g => new { Code = g.Key, Claims = g.Count(), Amount = g.Sum(t => t.Amount) })
+        .Where(claim => claim.Transaction.AssistanceCode != null)
+        .GroupBy(claim => claim.Transaction.AssistanceCode!)
+        .Select(g => new { Code = g.Key, Claims = g.Count(), Amount = g.Sum(claim => claim.Amount) })
         .ToListAsync())
       .GroupBy(p => p.Code.Trim().ToUpperInvariant())
       .Select(g => new DashboardProgramDto(
@@ -50,10 +51,20 @@ public class DashboardController(ApplicationDbContext context, TimeProvider time
       .OrderByDescending(p => p.Amount)
       .ToList();
 
-    var topCreditors = (await inMonth
-        .Where(t => t.CreditorId != null)
-        .GroupBy(t => t.CreditorId!.Value)
-        .Select(g => new { CreditorId = g.Key, Claims = g.Count(), Amount = g.Sum(t => t.Amount) })
+    var topCreditors = (await context.ServiceFundAllocations.AsNoTracking()
+        .Where(allocation => allocation.Status && allocation.CreditorId != null
+          && (allocation.TranService.Transaction.Status
+            || (allocation.TranService.Transaction.CreatedBy == null
+              && allocation.TranService.Transaction.LastUpdatedBy == null))
+          && allocation.TranService.Transaction.Date >= start
+          && allocation.TranService.Transaction.Date < end)
+        .GroupBy(allocation => allocation.CreditorId!.Value)
+        .Select(g => new
+        {
+          CreditorId = g.Key,
+          Claims = g.Select(allocation => allocation.TranService.TransactionId).Distinct().Count(),
+          Amount = g.Sum(allocation => allocation.Amount),
+        })
         .ToListAsync())
       .OrderByDescending(c => c.Amount ?? 0)
       .Take(TopCreditors)
@@ -65,9 +76,9 @@ public class DashboardController(ApplicationDbContext context, TimeProvider time
 
     var trendStart = start.AddMonths(1 - TrendMonths);
     var trendRows = await claims
-      .Where(t => t.Date >= trendStart && t.Date < end)
-      .GroupBy(t => new { t.Date!.Value.Year, t.Date.Value.Month })
-      .Select(g => new { g.Key.Year, g.Key.Month, Claims = g.Count(), Amount = g.Sum(t => t.Amount) })
+      .Where(claim => claim.Transaction.Date >= trendStart && claim.Transaction.Date < end)
+      .GroupBy(claim => new { claim.Transaction.Date!.Value.Year, claim.Transaction.Date.Value.Month })
+      .Select(g => new { g.Key.Year, g.Key.Month, Claims = g.Count(), Amount = g.Sum(claim => claim.Amount) })
       .ToListAsync();
     var trend = Enumerable.Range(0, TrendMonths)
       .Select(i => trendStart.AddMonths(i))
@@ -79,20 +90,32 @@ public class DashboardController(ApplicationDbContext context, TimeProvider time
       .ToList();
 
     var oldestWaiting = (await waiting
-        .OrderBy(t => t.Date == null).ThenBy(t => t.Date).ThenBy(t => t.TransactionId)
+        .OrderBy(claim => claim.Transaction.Date == null)
+        .ThenBy(claim => claim.Transaction.Date)
+        .ThenBy(claim => claim.Transaction.TransactionId)
         .Take(WaitingShown)
-        .Select(t => new
+        .Select(claim => new
         {
-          t.TransactionId,
-          t.RefNo,
-          t.Date,
-          t.PatientPersonId,
-          Last = t.PatientPerson!.LastName,
-          First = t.PatientPerson.FirstName,
-          t.AssistanceCode,
-          t.CreditorId,
-          CreditorName = t.Creditor!.CreditorName,
-          t.Amount,
+          claim.Transaction.TransactionId,
+          claim.Transaction.RefNo,
+          claim.Transaction.Date,
+          claim.Transaction.PatientPersonId,
+          Last = claim.Transaction.PatientPerson!.LastName,
+          First = claim.Transaction.PatientPerson.FirstName,
+          claim.Transaction.AssistanceCode,
+          CreditorId = context.ServiceFundAllocations.AsNoTracking()
+            .Where(allocation => allocation.Status
+              && allocation.TranService.TransactionId == claim.Transaction.TransactionId)
+            .OrderBy(allocation => allocation.ServiceFundAllocationId)
+            .Select(allocation => (int?)allocation.CreditorId)
+            .FirstOrDefault(),
+          CreditorName = context.ServiceFundAllocations.AsNoTracking()
+            .Where(allocation => allocation.Status
+              && allocation.TranService.TransactionId == claim.Transaction.TransactionId)
+            .OrderBy(allocation => allocation.ServiceFundAllocationId)
+            .Select(allocation => allocation.Creditor != null ? allocation.Creditor.CreditorName : null)
+            .FirstOrDefault(),
+          claim.Amount,
         })
         .ToListAsync())
       .Select(t => new DashboardClaimDto(
@@ -112,14 +135,14 @@ public class DashboardController(ApplicationDbContext context, TimeProvider time
       start.Year,
       start.Month,
       await inMonth.CountAsync(),
-      await inMonth.SumAsync(t => t.Amount) ?? 0,
+      await inMonth.SumAsync(claim => claim.Amount) ?? 0,
       await inPrevious.CountAsync(),
-      await inPrevious.SumAsync(t => t.Amount) ?? 0,
+      await inPrevious.SumAsync(claim => claim.Amount) ?? 0,
       await inYear.CountAsync(),
-      await inYear.SumAsync(t => t.Amount) ?? 0,
+      await inYear.SumAsync(claim => claim.Amount) ?? 0,
       await context.People.CountAsync(p => p.Status && p.DateCreated >= start && p.DateCreated < end),
       await waiting.CountAsync(),
-      await waiting.SumAsync(t => t.Amount) ?? 0,
+      await waiting.SumAsync(claim => claim.Amount) ?? 0,
       byProgram,
       topCreditors.Select(c => new DashboardCreditorDto(
         c.CreditorId, creditorNames.GetValueOrDefault(c.CreditorId), c.Claims, c.Amount ?? 0)).ToList(),
@@ -143,10 +166,11 @@ public class DashboardController(ApplicationDbContext context, TimeProvider time
     var inPeriod = claims.Where(t => t.Date >= start && t.Date < end);
     var patientIds = inPeriod.Where(t => t.PatientPersonId != null).Select(t => t.PatientPersonId!.Value);
 
-    var perPerson = (await inPeriod
-        .Where(t => t.PatientPersonId != null)
-        .GroupBy(t => t.PatientPersonId!.Value)
-        .Select(g => new { PersonId = g.Key, Claims = g.Count(), Amount = g.Sum(t => t.Amount) })
+    var perPerson = (await CountedClaimsWithAmounts()
+        .Where(claim => claim.Transaction.Date >= start && claim.Transaction.Date < end
+          && claim.Transaction.PatientPersonId != null)
+        .GroupBy(claim => claim.Transaction.PatientPersonId!.Value)
+        .Select(g => new { PersonId = g.Key, Claims = g.Count(), Amount = g.Sum(claim => claim.Amount) })
         .ToListAsync())
       .ToDictionary(r => r.PersonId);
 
@@ -297,11 +321,37 @@ public class DashboardController(ApplicationDbContext context, TimeProvider time
   private IQueryable<Transaction> CountedClaims() =>
     context.Transactions.AsNoTracking().Where(t => t.Status || (t.CreatedBy == null && t.LastUpdatedBy == null));
 
-  // Assistance has a row per budget release
+  private IQueryable<ClaimFinancial> CountedClaimsWithAmounts()
+  {
+    var allocationTotals = context.ServiceFundAllocations.AsNoTracking()
+      .Where(allocation => allocation.Status)
+      .GroupBy(allocation => allocation.TranService.TransactionId)
+      .Select(group => new
+      {
+        TransactionId = group.Key,
+        Amount = group.Sum(allocation => allocation.Amount),
+      });
+
+    return from transaction in CountedClaims()
+      join allocation in allocationTotals on transaction.TransactionId equals allocation.TransactionId into totals
+      from allocation in totals.DefaultIfEmpty()
+      select new ClaimFinancial
+      {
+        Transaction = transaction,
+        Amount = allocation == null ? null : allocation.Amount,
+      };
+  }
+
+  private sealed class ClaimFinancial
+  {
+    public Transaction Transaction { get; init; } = null!;
+    public decimal? Amount { get; init; }
+  }
+
   private async Task<Dictionary<string, string?>> ProgramNamesAsync() =>
-    (await context.Assistances.AsNoTracking()
-      .Where(a => a.AssistanceCode != null)
-      .Select(a => new { a.AssistanceCode, a.AssistanceType })
+    (await context.SourceOfAssistances.AsNoTracking()
+      .Where(source => source.SourceCode != null)
+      .Select(source => new { AssistanceCode = source.SourceCode, AssistanceType = source.SourceDesc })
       .ToListAsync())
     .GroupBy(a => a.AssistanceCode!.Trim().ToUpperInvariant())
     .ToDictionary(g => g.Key, g => g.First().AssistanceType);

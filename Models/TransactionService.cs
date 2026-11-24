@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Claims.API.Models;
 
+[Index("TransactionId", Name = "IX_TransactionServices_TransactionID")]
 public partial class TransactionService
 {
     [Key]
@@ -21,6 +22,9 @@ public partial class TransactionService
     [ForeignKey("NatureId")]
     [InverseProperty("TransactionServices")]
     public virtual NatureOfService? Nature { get; set; }
+
+    [InverseProperty("TranService")]
+    public virtual ICollection<ServiceFundAllocation> ServiceFundAllocations { get; set; } = new List<ServiceFundAllocation>();
 
     [ForeignKey("TransactionId")]
     [InverseProperty("TransactionServices")]

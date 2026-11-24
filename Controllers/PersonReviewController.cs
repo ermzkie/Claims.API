@@ -245,18 +245,26 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
         RepMiddle = t.RepresentativePerson.MiddleName,
         RepText = t.Representative,
         t.AssistanceCode,
-        t.CreditorId,
-        CreditorName = t.Creditor!.CreditorName,
-        t.Amount,
+        Allocation = t.TransactionServices
+          .SelectMany(service => service.ServiceFundAllocations)
+          .Where(allocation => allocation.Status)
+          .OrderBy(allocation => allocation.ServiceFundAllocationId)
+          .Select(allocation => new
+          {
+            allocation.CreditorId,
+            CreditorName = allocation.Creditor != null ? allocation.Creditor.CreditorName : null,
+            allocation.Amount,
+          })
+          .FirstOrDefault(),
         WorkerLast = t.SocialWorkerUser!.Lastname,
         WorkerFirst = t.SocialWorkerUser.Firstname,
         t.SocialWorkerId,
       })
       .ToListAsync();
 
-    var programs = (await context.Assistances.AsNoTracking()
-        .Where(a => a.AssistanceCode != null)
-        .Select(a => new { a.AssistanceCode, a.AssistanceType })
+    var programs = (await context.SourceOfAssistances.AsNoTracking()
+        .Where(source => source.SourceCode != null)
+        .Select(source => new { AssistanceCode = source.SourceCode, AssistanceType = source.SourceDesc })
         .ToListAsync())
       .GroupBy(a => a.AssistanceCode!.Trim().ToUpperInvariant())
       .ToDictionary(g => g.Key, g => g.First().AssistanceType);
@@ -289,9 +297,9 @@ public class PersonReviewController(ApplicationDbContext context, ICurrentUser c
           asPatient ? r.RepresentativePersonId : r.PatientPersonId,
           r.AssistanceCode?.Trim(),
           r.AssistanceCode is null ? null : programs.GetValueOrDefault(r.AssistanceCode.Trim().ToUpperInvariant()),
-          r.CreditorId,
-          r.CreditorName,
-          r.Amount,
+          r.Allocation?.CreditorId,
+          r.Allocation?.CreditorName,
+          r.Allocation?.Amount,
           worker);
       })
       .ToList();

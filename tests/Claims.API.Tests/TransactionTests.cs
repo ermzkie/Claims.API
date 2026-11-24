@@ -56,7 +56,7 @@ public class TransactionTests
 
     await using (var db = app.CreateDbContext())
     {
-      await db.Database.ExecuteSqlRawAsync("INSERT INTO Assistance (AssistanceID, AssistanceCode, AssistanceType) VALUES (1, 'AICS', 'AICS')");
+      await db.AddProgramsAsync(("AICS", "AICS"));
     }
     await worker.PostAsync($"/api/transactions/{transactionId}/checkout-social-worker", null);
 

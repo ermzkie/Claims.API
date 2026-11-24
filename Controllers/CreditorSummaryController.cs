@@ -34,14 +34,22 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
           .Count(),
         Amount = g.Sum(allocation => allocation.Amount),
         LastClaim = g.Max(allocation => allocation.TranService.Transaction.Date),
-        AllClaims = g.Select(allocation => allocation.TranService.TransactionId)
-          .Distinct()
-          .Count(),
       })
-      .ToListAsync();
+      .ToDictionaryAsync(r => r.CreditorId);
 
-    return rows
-      .Select(r => new CreditorTotalsDto(r.CreditorId, r.Claims, r.Amount ?? 0, r.LastClaim, r.AllClaims))
+    // every claim on the creditor, released or not, so removing it warns about all of them
+    var all = await context.ServiceFundAllocations.AsNoTracking()
+      .Where(allocation => allocation.Status && allocation.CreditorId != null)
+      .Select(allocation => new { CreditorId = allocation.CreditorId!.Value, allocation.TranService.TransactionId })
+      .Distinct()
+      .GroupBy(x => x.CreditorId)
+      .Select(g => new { CreditorId = g.Key, Count = g.Count() })
+      .ToDictionaryAsync(x => x.CreditorId, x => x.Count);
+
+    return all.Keys
+      .Select(id => rows.TryGetValue(id, out var r)
+        ? new CreditorTotalsDto(id, r.Claims, r.Amount ?? 0, r.LastClaim, all[id])
+        : new CreditorTotalsDto(id, 0, 0, null, all[id]))
       .ToList();
   }
 
@@ -73,7 +81,11 @@ public class CreditorSummaryController(ApplicationDbContext context) : Controlle
       await claims.SumAsync(claim => claim.Amount) ?? 0,
       await claims.MinAsync(claim => claim.Transaction.Date),
       await claims.MaxAsync(claim => claim.Transaction.Date),
-      await claims.CountAsync(),
+      await context.ServiceFundAllocations.AsNoTracking()
+        .Where(allocation => allocation.Status && allocation.CreditorId == id)
+        .Select(allocation => allocation.TranService.TransactionId)
+        .Distinct()
+        .CountAsync(),
       await claims.CountAsync(claim => claim.Transaction.Date == null),
       byYear
         .OrderByDescending(y => y.Year)

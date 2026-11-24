@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Claims.API.Models;
 
+[Index("TransactionId", Name = "IX_TransactionServices_TransactionID")]
 public partial class TransactionService
 {
     [Key]

@@ -6,6 +6,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Claims.API.Models;
 
+[Index("CreditorId", Name = "IX_ServiceFundAllocations_CreditorID")]
+[Index("TranServiceId", Name = "IX_ServiceFundAllocations_TranServiceID")]
 public partial class ServiceFundAllocation
 {
     [Key]

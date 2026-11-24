@@ -45,11 +45,6 @@ public class TransactionsController(
   {
     if(!CanHandleMoney)
       return Forbid();
-    // var transactions = await WithDetails(context.Transactions.AsNoTracking()
-    //     .Where(x => x.SocialWorkerUserId == currentUser.Id))
-    //   .OrderByDescending(x => x.Date)
-    //   .ThenByDescending(x => x.TransactionId)
-    //   .ToListAsync(cancellationToken);
     var transactions = await WithDetails(context.Transactions
     .AsNoTracking()
     .Where(x => x.SocialWorkerUserId == currentUser.Id)

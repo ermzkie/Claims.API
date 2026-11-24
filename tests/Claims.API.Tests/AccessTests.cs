@@ -84,6 +84,18 @@ public class AccessTests
       Assert.True((await o.Worker.GetAsync(path)).StatusCode == HttpStatusCode.OK, $"{path} should be 200 for a social worker");
   }
 
+  // approvers see the claims they approve, the role table gives them the same views
+  [Fact]
+  public async Task Approver_CanReadClaimsAndMoney()
+  {
+    await using var o = await SetupAsync();
+    await CreateUserAsync(o.App, "approver", Password, "Approver");
+    using var approver = await LoginAsAsync(o.App, "approver", Password);
+    foreach (var path in ClaimAndMoneyViews(o))
+      Assert.True((await approver.GetAsync(path)).StatusCode == HttpStatusCode.OK, $"{path} should be 200 for an approver");
+    Assert.Equal(HttpStatusCode.Forbidden, (await approver.GetAsync($"/api/creditor/{o.CreditorId}/claims/export")).StatusCode);
+  }
+
   [Fact]
   public async Task Export_IsAdminOnly()
   {

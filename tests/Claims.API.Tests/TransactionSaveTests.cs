@@ -627,6 +627,32 @@ public class TransactionSaveTests
   }
 
   [Fact]
+  public async Task ReleaseAfterApproval_NeedsBirthdate()
+  {
+    await using var o = await SetupAsync();
+    var noBirthdate = await PersonAsync(o, "NOBDAY");
+    var created = await Save(o.Front, new { date = "2026-11-10T09:00", laneTypeId = o.LaneId, patientPersonId = noBirthdate });
+    var id = (await created.Content.ReadFromJsonAsync<TransactionResponseDto>())!.TransactionId;
+    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
+    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, amount = 100m, assistanceCode = "AICS" })).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await o.Worker.PostAsync($"/api/transactions/{id}/submit-for-approval", null)).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await o.Admin.PostAsync($"/api/transactions/{id}/approve", null)).StatusCode);
+
+    var refused = await o.Worker.PostAsync($"/api/transactions/{id}/release", null);
+    Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+    Assert.Contains("Set the client's birthdate or approximate age before releasing.", await refused.Content.ReadAsStringAsync());
+
+    await using (var db = o.App.CreateDbContext())
+    {
+      var p = await db.People.FindAsync(noBirthdate);
+      p!.Birthdate = new DateOnly(1956, 1, 1);
+      p.BirthdateEstimated = true;
+      await db.SaveChangesAsync();
+    }
+    Assert.Equal(HttpStatusCode.OK, (await o.Worker.PostAsync($"/api/transactions/{id}/release", null)).StatusCode);
+  }
+
+  [Fact]
   public async Task ClearRepresentative_ClearsLinkAndOldText()
   {
     await using var o = await SetupAsync();

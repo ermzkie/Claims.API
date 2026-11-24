@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Claims.API.Services;
 
-public enum QueueActionOutcome { Ok, NotFound, Forbidden, NotServing, Closed }
+public enum QueueActionOutcome { Ok, NotFound, Forbidden, NotServing, Closed, InApproval }
 
 // the queue is worked out from today's claims and their change log, no extra columns
 public class QueueService(ApplicationDbContext db, TimeProvider time)
@@ -23,7 +23,8 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
   // office time with no zone, like the dates stored on claims
   public DateTime Now() => DateTime.SpecifyKind(time.GetUtcNow().UtcDateTime.AddHours(8), DateTimeKind.Unspecified);
 
-  private enum State { Waiting, Serving, NotServed, Done }
+  // InApproval: sent or returned, the worker is free to call the next client
+  private enum State { Waiting, Serving, NotServed, Done, InApproval }
 
   private sealed record Log(int TransactionId, string Action, string? Remark, string? By, DateTime At, int Id);
 
@@ -66,7 +67,8 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
       var mine = logs[c.TransactionId].OrderBy(l => l.At).ThenBy(l => l.Id).ToList();
       var latest = mine.LastOrDefault();
       var since = mine.LastOrDefault(l => l.Action is CheckedOut or TakenOver)?.At ?? c.DateLastUpdated;
-      var state = c.IsReleased == true ? State.Done
+      var state = c.IsReleased == true || c.ApprovalStatusId == ApprovalStatuses.Approved ? State.Done
+        : c.ApprovalStatusId is ApprovalStatuses.Waiting or ApprovalStatuses.Returned ? State.InApproval
         : c.SocialWorkerUserId is not null ? State.Serving
         : latest?.Action == NotServed ? State.NotServed
         : State.Waiting;
@@ -140,7 +142,8 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
       var now = Now();
       // only wins if nobody grabbed it in between, so two workers never get the same client
       var taken = await db.Transactions
-        .Where(t => t.TransactionId == id && t.SocialWorkerUserId == null && t.IsReleased != true)
+        .Where(t => t.TransactionId == id && t.SocialWorkerUserId == null && t.IsReleased != true
+          && t.ApprovalStatusId == ApprovalStatuses.Pending)
         .ExecuteUpdateAsync(u => u
           .SetProperty(t => t.SocialWorkerUserId, userId)
           .SetProperty(t => t.LastUpdatedBy, userId)
@@ -163,8 +166,10 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
     var claim = await db.Transactions.FirstOrDefaultAsync(t => t.TransactionId == id, ct);
     if (claim is null)
       return QueueActionOutcome.NotFound;
-    if (claim.IsReleased == true || ClaimRules.IsCancelled(claim))
+    if (claim.IsReleased == true || claim.ApprovalStatusId == ApprovalStatuses.Approved || ClaimRules.IsCancelled(claim))
       return QueueActionOutcome.Closed;
+    if (claim.ApprovalStatusId != ApprovalStatuses.Pending)
+      return QueueActionOutcome.InApproval;
     if (claim.SocialWorkerUserId is null)
       return QueueActionOutcome.NotServing;
     if (claim.SocialWorkerUserId != userId && !isAdmin)

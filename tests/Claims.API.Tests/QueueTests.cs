@@ -328,6 +328,46 @@ public class QueueTests
     Assert.Equal(HttpStatusCode.BadRequest, tooLong.StatusCode);
   }
 
+  private static async Task SendForApprovalAsync(HttpClient client, int id)
+  {
+    Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsJsonAsync("/api/transactions/save",
+      new { transactionId = id, amount = 100m, assistanceCode = "AICS" })).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/transactions/{id}/submit-for-approval", null)).StatusCode);
+  }
+
+  // the approvers have it now, so the worker can call the next client
+  [Fact]
+  public async Task SentForApproval_FreesTheWorker()
+  {
+    await using var o = await SetupAsync();
+    await FileAsync(o, o.S);
+    await FileAsync(o, o.S);
+    var s1 = await NextAsync(o.Worker);
+    await SendForApprovalAsync(o.Worker, s1!.TransactionId);
+
+    var lane = Lane(await TodayAsync(o.Worker), "S");
+    Assert.DoesNotContain(lane.Serving, x => x.TransactionId == s1.TransactionId);
+    Assert.DoesNotContain(lane.Waiting, x => x.TransactionId == s1.TransactionId);
+    Assert.Equal("S2", (await NextAsync(o.Worker))!.QueueNoCode);
+
+    // approved and not released yet: still off the serving list
+    Assert.Equal(HttpStatusCode.OK, (await o.Admin.PostAsync($"/api/transactions/{s1.TransactionId}/approve", null)).StatusCode);
+    Assert.DoesNotContain(Lane(await TodayAsync(o.Worker), "S").Serving, x => x.TransactionId == s1.TransactionId);
+  }
+
+  [Fact]
+  public async Task QueueActions_ClaimWithTheApprovers_Is409()
+  {
+    await using var o = await SetupAsync();
+    await FileAsync(o, o.S);
+    var s1 = await NextAsync(o.Worker);
+    await SendForApprovalAsync(o.Worker, s1!.TransactionId);
+
+    var response = await o.Worker.PostAsJsonAsync($"/api/queue/{s1.TransactionId}/return", new { });
+    Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    Assert.Contains("sent for approval", await response.Content.ReadAsStringAsync());
+  }
+
   [Fact]
   public async Task QueueActions_ReleasedClaim_Is409()
   {

@@ -490,8 +490,9 @@ public class TransactionTests
     int forbiddenTransactionId;
     await using (var db = app.CreateDbContext())
     {
+      // only the worker holding the claim (or an admin) can send it
       var workerTransaction = new Transaction
-        { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = existingWorkerId };
+        { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = workerId };
       var adminTransaction = new Transaction
         { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = existingWorkerId };
       var forbiddenTransaction = new Transaction
@@ -519,11 +520,9 @@ public class TransactionTests
     var submitted = await verify.Transactions
       .Where(item => item.TransactionId == workerTransactionId || item.TransactionId == adminTransactionId)
       .ToListAsync();
-    Assert.All(submitted, transaction =>
-    {
-      Assert.Equal((short)2, transaction.ApprovalStatusId);
-      Assert.Equal(existingWorkerId, transaction.SocialWorkerUserId);
-    });
+    Assert.All(submitted, transaction => Assert.Equal((short)2, transaction.ApprovalStatusId));
+    Assert.Equal(workerId, submitted.Single(t => t.TransactionId == workerTransactionId).SocialWorkerUserId);
+    Assert.Equal(existingWorkerId, submitted.Single(t => t.TransactionId == adminTransactionId).SocialWorkerUserId);
 
     var notSubmitted = await verify.Transactions.SingleAsync(item => item.TransactionId == forbiddenTransactionId);
     Assert.Equal((short)1, notSubmitted.ApprovalStatusId);
@@ -616,9 +615,11 @@ public class TransactionTests
     int forbiddenTransactionId;
     await using (var db = app.CreateDbContext())
     {
-      var workerTransaction = new Transaction { Status = true, ApprovalStatusId = 1 };
-      var adminTransaction = new Transaction { Status = true, ApprovalStatusId = 1 };
-      var forbiddenTransaction = new Transaction { Status = true, ApprovalStatusId = 1 };
+      // approved claims of a client with a birthdate, the worker's own
+      var client = new Person { FirstName = "MARIA", LastName = "SANTOS", Status = true, Birthdate = new DateOnly(1958, 3, 1) };
+      var workerTransaction = new Transaction { Status = true, ApprovalStatusId = 3, SocialWorkerUserId = workerId, PatientPerson = client };
+      var adminTransaction = new Transaction { Status = true, ApprovalStatusId = 3, SocialWorkerUserId = workerId, PatientPerson = client };
+      var forbiddenTransaction = new Transaction { Status = true, ApprovalStatusId = 3, SocialWorkerUserId = workerId, PatientPerson = client };
       db.Transactions.AddRange(workerTransaction, adminTransaction, forbiddenTransaction);
       await db.SaveChangesAsync();
       workerTransactionId = workerTransaction.TransactionId;

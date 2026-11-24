@@ -36,6 +36,11 @@ public class TransactionsController(
   private bool CanHandleMoney => IsAdmin || currentUser.IsInRole(RoleNames.SocialWorker);
   private bool CanApprove => IsAdmin || currentUser.IsInRole(RoleNames.Approver);
 
+  private const string NeedsBirthdate = "Set the client's birthdate or approximate age before releasing.";
+
+  private Task<bool> HasBirthdateAsync(int? personId, CancellationToken ct) =>
+    context.People.AnyAsync(p => p.PersonId == personId && p.Birthdate != null, ct);
+
   private DateTime Now() => time.GetUtcNow().UtcDateTime.AddHours(8);
 
   [HttpGet("current-social-worker")]
@@ -147,8 +152,7 @@ public class TransactionsController(
       case null:
       case "":
       case "all":
-        //show all active transactions.
-        query = query.Where(ClaimRules.Counted);
+        // the status filter above already picks active or cancelled
         break;
 
       case "waiting":
@@ -733,6 +737,9 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
       });
     }
 
+    if (!await HasBirthdateAsync(transaction.PatientPersonId, cancellationToken))
+      return BadRequest(new { message = NeedsBirthdate });
+
     var previousIsReleased = transaction.IsReleased;
     var previousReleasedBy = transaction.ReleasedBy;
     var previousDateReleased = transaction.DateReleased;
@@ -900,9 +907,8 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
     if (next.IsReleased == true && current?.IsReleased != true && next.AssistanceCode is null)
       return "Set the program before releasing the claim.";
     // every release, old claims too: this is how the missing birthdates get filled in
-    if (next.IsReleased == true && current?.IsReleased != true
-        && !await context.People.AnyAsync(p => p.PersonId == next.PatientPersonId && p.Birthdate != null, ct))
-      return "Set the client's birthdate or approximate age before releasing.";
+    if (next.IsReleased == true && current?.IsReleased != true && !await HasBirthdateAsync(next.PatientPersonId, ct))
+      return NeedsBirthdate;
 
     if (Changed("natureIds") && natureIds.Count > 0)
     {

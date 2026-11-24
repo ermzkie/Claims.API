@@ -305,7 +305,11 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 - A new claim for someone already open in that day's queue (not released, not cancelled) is 409
   `{ message, transactionId, queueNoCode, sameDay: true }`. Send `confirmSameDay: true` for a real second visit.
 - Releasing needs the client's birthdate (exact, or estimated from an approximate age: `birthdateEstimated` on the
-  person), every claim, old ones too.
+  person), every claim, old ones too. Same for `POST /api/transactions/{id}/release` (400).
+- Approvers can read claims, the dashboard, creditors and reports, like social workers. They can't change money
+  fields or release.
+- Queue: a claim sent for approval or returned is out of the serving list, so the worker can take the next client.
+  Approved claims count as done. Return / not served on them is 409.
 - `clearRepresentative: true` removes the representative (the linked person and the old free-text one).
   The client can be their own representative (the intake sheet's "same as the patient").
 - `assistanceCode` (program) is a code from `/api/lookups/assistance-programs`, Social Worker / admins only.

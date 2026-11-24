@@ -36,25 +36,23 @@ public class CreditorClaimsBrowserTests
       db.Transactions.AddRange(
         new Transaction
         {
-          TransactionId = 101, CreditorId = 1, Status = true, Amount = 1000m, Date = new DateTime(2026, 10, 1),
+          TransactionId = 101, Status = true, Date = new DateTime(2026, 10, 1),
           RefNo = "A-10-01-26-0001", PatientPersonId = 10, AssistanceCode = "A", SocialWorkerUserId = 50,
           RepresentativePersonId = 11, IsReleased = true, SocialWorkerAssessment = "Needs help", Remarks = "OK",
           CreatedBy = 51, DateCreated = new DateTime(2026, 10, 1, 9, 0, 0), LastUpdatedBy = 50,
-        },
+        }.WithMoney(creditorId: 1, amount: 1000m).Released(),
         new Transaction
         {
-          TransactionId = 102, CreditorId = 1, Status = true, Amount = 5000m, Date = new DateTime(2026, 10, 2),
+          TransactionId = 102, Status = true, Date = new DateTime(2026, 10, 2),
           RefNo = "C-10-02-26-0002", PatientPersonId = 11, AssistanceCode = "C", SocialWorkerId = "123",
           Representative = "  wife  ",
-        },
-        new Transaction { TransactionId = 103, CreditorId = 1, Status = true, Amount = 300m, Date = new DateTime(2026, 11, 5), RefNo = "A-11-05-26-0003", PatientPersonId = 12, AssistanceCode = "A " },
-        new Transaction { TransactionId = 104, CreditorId = 1, Status = false, CreatedBy = 51, Amount = 7m, Date = new DateTime(2026, 11, 6), RefNo = "A-DELETED", PatientPersonId = 10, AssistanceCode = "A" },
-        new Transaction { TransactionId = 201, CreditorId = 2, Status = true, Amount = 75m, Date = new DateTime(2026, 11, 1), RefNo = "B-1", PatientPersonId = 10, AssistanceCode = "A" });
+        }.WithMoney(creditorId: 1, amount: 5000m).Released(),
+        new Transaction { TransactionId = 103, Status = true, Date = new DateTime(2026, 11, 5), RefNo = "A-11-05-26-0003", PatientPersonId = 12, AssistanceCode = "A " }.WithMoney(creditorId: 1, amount: 300m).Released(),
+        new Transaction { TransactionId = 104, Status = false, CreatedBy = 51, Date = new DateTime(2026, 11, 6), RefNo = "A-DELETED", PatientPersonId = 10, AssistanceCode = "A" }.WithMoney(creditorId: 1, amount: 7m),
+        new Transaction { TransactionId = 201, Status = true, Date = new DateTime(2026, 11, 1), RefNo = "B-1", PatientPersonId = 10, AssistanceCode = "A" }.WithMoney(creditorId: 2, amount: 75m).Released());
       db.TransactionServices.Add(new TransactionService { TransactionId = 101, NatureId = 1 });
       await db.SaveChangesAsync();
-      // Assistance has no key in the model, so it can only be seeded with SQL.
-      await db.Database.ExecuteSqlRawAsync(
-        "INSERT INTO Assistance (AssistanceID, AssistanceCode, AssistanceType) VALUES (1, 'A', 'AICS'), (2, 'C', 'IHF-MEDICAL')");
+      await db.AddProgramsAsync(("A", "AICS"), ("C", "IHF-MEDICAL"));
     }
     return (app, await LoginAsAsync(app, "fl", Pw));
   }

@@ -941,12 +941,8 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
     if (next.AssistanceCode is not null && Changed("assistanceCode"))
     {
       var code = next.AssistanceCode;
-      var programExists = await context.Database
-        .SqlQueryRaw<int>(
-          "SELECT 1 AS [Value] FROM Assistance WHERE AssistanceCode IS NOT NULL AND UPPER(LTRIM(RTRIM(AssistanceCode))) = {0}",
-          code)
-        .AnyAsync(ct);
-      if (!programExists)
+      // programs are SourceOfAssistance codes now, the Assistance table is gone
+      if (!await context.SourceOfAssistances.AnyAsync(x => x.SourceCode != null && x.SourceCode.Trim().ToUpper() == code, ct))
         return "Program was not found.";
     }
 

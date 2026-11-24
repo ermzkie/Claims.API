@@ -44,6 +44,7 @@ internal static class TransactionResponseMapper
       .Where(service => service.NatureId.HasValue)
       .Select(service => service.NatureId!.Value)
       .ToList(),
+    ApprovalStatusId = transaction.ApprovalStatusId
   };
 
   private static string? PersonName(Person? person)

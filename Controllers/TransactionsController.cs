@@ -28,6 +28,7 @@ public class TransactionsController(
   // fields only social workers and admins may change
   private static readonly string[] MoneyFields =
     ["fundSourceId", "creditorId", "modeId", "amount", "socialWorkerAssessment", "isReleased", "assistanceCode"];
+    
 
   private bool IsAdmin =>
     currentUser.IsInRole(RoleNames.SuperAdministrator) || currentUser.IsInRole(RoleNames.Administrator);
@@ -42,13 +43,65 @@ public class TransactionsController(
   public async Task<ActionResult<List<TransactionResponseDto>>> GetAllCurrentTransactionsOfSocialWorker(
     CancellationToken cancellationToken)
   {
-    var transactions = await WithDetails(context.Transactions.AsNoTracking()
-        .Where(x => x.SocialWorkerUserId == currentUser.Id))
-      .OrderByDescending(x => x.Date)
+    if(!CanHandleMoney)
+      return Forbid();
+    var transactions = await WithDetails(context.Transactions
+    .AsNoTracking()
+    .Where(x => x.SocialWorkerUserId == currentUser.Id)
+    //Pending (1) and returned (4) only
+    //submitted (2) and Approved (3) are no longer in this list.
+    .Where(x => x.ApprovalStatusId == 1 ||
+                x.ApprovalStatusId == 4)
+                .Where(ClaimRules.Counted))
+                .OrderByDescending(x => x.Date)
+                .ThenByDescending(x => x.TransactionId)
+                .ToListAsync(cancellationToken);              
+    return Ok(transactions.Select(TransactionResponseMapper.ToResponse).ToList());
+  }
+
+  //GET PENDING APPROVAL FOR APPROVER
+  [HttpGet("pending-approval")]
+  public async Task<ActionResult<List<TransactionResponseDto>>> GetPendingApprovalTransactions(CancellationToken cancellationToken)
+  {
+    if (!CanApprove)
+    {
+      return Forbid();
+    }
+
+    var transactions = await WithDetails(
+      context.Transactions
+      .AsNoTracking()
+      .Where(ClaimRules.Counted)
+      .Where(x => x.ApprovalStatusId == 2))
+      .OrderByDescending(x=> x.DateCreated)
       .ThenByDescending(x => x.TransactionId)
       .ToListAsync(cancellationToken);
+    return Ok(transactions.Select(
+      TransactionResponseMapper.ToResponse
+    ).ToList());
+  }
 
-    return Ok(transactions.Select(TransactionResponseMapper.ToResponse).ToList());
+  //SOCIAL WORKER MY FOR RELEASE TRANSACTION
+  [HttpGet("my-for-release")]
+  public async Task<ActionResult<List<TransactionResponseDto>>> GetMyClaimsForRelease(
+    CancellationToken cancellationToken)
+  {
+    if(!CanHandleMoney)
+    return Forbid();
+
+    var transactions = await WithDetails(
+      context.Transactions
+      .AsNoTracking()
+      .Where(ClaimRules.Counted)
+      .Where(x => x.SocialWorkerUserId == currentUser.Id)
+      .Where(x => x.ApprovalStatusId == 3)
+      .Where(x => x.IsReleased != true)
+    )
+    .OrderByDescending(x => x.DateApproved)
+    .ThenByDescending(x => x.TransactionId)
+    .ToListAsync(cancellationToken);
+
+   return Ok(transactions.Select(TransactionResponseMapper.ToResponse).ToList());
   }
 
   [HttpGet]
@@ -87,6 +140,58 @@ public class TransactionsController(
       default:
         return BadRequest(new { message = "Status must be active, cancelled or all." });
     }
+
+    //TAB FILTERING FOR TRANSACTIONS
+    switch (parameters.Tab?.Trim().ToLowerInvariant())
+    {
+      case null:
+      case "":
+      case "all":
+        //show all active transactions.
+        query = query.Where(ClaimRules.Counted);
+        break;
+
+      case "waiting":
+      query = query
+      .Where(ClaimRules.Counted)
+      .Where(x => x.ApprovalStatusId == 1 && x.IsReleased != true);
+      break;
+
+      case "for-approval":
+        query = query
+        .Where(ClaimRules.Counted)
+        .Where(x => x.ApprovalStatusId == 2);
+      break;
+
+     case "approved":
+     query = query
+     .Where(ClaimRules.Counted)
+     .Where(x => x.ApprovalStatusId == 3);
+     break;
+
+     case "returned":
+     query = query
+     .Where(ClaimRules.Counted)
+     .Where(x => x.ApprovalStatusId == 4);
+     break;
+
+    case "released":
+    query = query
+    .Where(ClaimRules.Counted)
+    .Where(x => x.IsReleased == true );
+    break;
+
+    case "history":
+    break;
+
+     default:
+        return BadRequest(new
+        {
+            message = "Invalid tab. Valid tabs: all, waiting, for-approval, approved, returned, released, history."
+        });
+
+    }
+
 
     if (parameters.StartDate.HasValue)
     {
@@ -481,6 +586,12 @@ public class TransactionsController(
     if (transaction.IsReleased == true)
       return Conflict(new { message = "This claim is already released." });
 
+    if (!IsAdmin && transaction.SocialWorkerUserId != currentUser.Id)
+    {
+      return Forbid();
+    }
+
+
     if (transaction.ApprovalStatusId == 2)
       return Ok(TransactionResponseMapper.ToResponse(transaction));
 
@@ -488,7 +599,7 @@ public class TransactionsController(
     var now = Now();
     transaction.ApprovalStatusId = 2;
     Touch(transaction, now);
-    Log(transaction, "Submitted for approval",
+    Log(transaction, "SubmittedForApproval",
       new Dictionary<string, object?> { ["approvalStatusId"] = previous },
       new Dictionary<string, object?> { ["approvalStatusId"] = transaction.ApprovalStatusId },
       null, now);
@@ -498,96 +609,166 @@ public class TransactionsController(
     return Ok(TransactionResponseMapper.ToResponse(transaction));
   }
 
-  [HttpPost("{id:int}/approve")]
-  public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
+[HttpPost("{id:int}/approve")]
+public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
     int id,
     CancellationToken cancellationToken)
-  {
+{
     if (!CanApprove)
-      return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only approvers and admins can approve claims." });
+    {
+        return StatusCode(StatusCodes.Status403Forbidden, new
+        {
+            message = "Only approvers and admins can approve claims."
+        });
+    }
 
-    var transaction = await LoadAsync(id, cancellationToken, tracking: true);
+    var transaction = await LoadAsync(
+        id,
+        cancellationToken,
+        tracking: true);
+
     if (transaction is null)
-      return NotFound(new { message = "Transaction not found." });
-    if (ClaimRules.IsCancelled(transaction))
-      return Conflict(new { message = "This claim was cancelled." });
-    if (transaction.IsReleased == true)
-      return Conflict(new { message = "This claim is already released." });
+        return NotFound(new { message = "Transaction not found." });
 
+    if (ClaimRules.IsCancelled(transaction))
+        return Conflict(new { message = "This claim was cancelled." });
+
+    if (transaction.IsReleased == true)
+        return Conflict(new { message = "This claim has already been released." });
+
+    // Idempotent response: do not create another approval audit entry.
     if (transaction.ApprovalStatusId == 3)
-      return Ok(TransactionResponseMapper.ToResponse(transaction));
+        return Ok(TransactionResponseMapper.ToResponse(transaction));
+
+    // Only submitted claims can be approved.
+    if (transaction.ApprovalStatusId != 2)
+    {
+        return Conflict(new
+        {
+            message = "Only claims submitted for approval can be approved."
+        });
+    }
 
     var previousStatus = transaction.ApprovalStatusId;
     var previousApprovedBy = transaction.ApprovedBy;
     var previousDateApproved = transaction.DateApproved;
+
     var now = Now();
+
     transaction.ApprovalStatusId = 3;
     transaction.ApprovedBy = currentUser.Id;
     transaction.DateApproved = now;
+
+    // IMPORTANT:
+    // Do not change SocialWorkerUserId.
+    // The original Social Worker retains ownership of the claim.
+
     Touch(transaction, now);
-    Log(transaction, "Approved the transaction",
-      new Dictionary<string, object?>
-      {
-        ["approvalStatusId"] = previousStatus,
-        ["approvedBy"] = previousApprovedBy,
-        ["dateApproved"] = previousDateApproved,
-      },
-      new Dictionary<string, object?>
-      {
-        ["approvalStatusId"] = transaction.ApprovalStatusId,
-        ["approvedBy"] = transaction.ApprovedBy,
-        ["dateApproved"] = transaction.DateApproved,
-      },
-      null, now);
+
+    Log(
+        transaction,
+        "Approved",
+        new Dictionary<string, object?>
+        {
+            ["approvalStatusId"] = previousStatus,
+            ["approvedBy"] = previousApprovedBy,
+            ["dateApproved"] = previousDateApproved
+        },
+        new Dictionary<string, object?>
+        {
+            ["approvalStatusId"] = transaction.ApprovalStatusId,
+            ["approvedBy"] = transaction.ApprovedBy,
+            ["dateApproved"] = transaction.DateApproved
+        },
+        null,
+        now);
+
     if (!await TrySaveAsync(cancellationToken))
-      return Changed();
+        return Changed();
 
     return Ok(TransactionResponseMapper.ToResponse(transaction));
-  }
+}
 
   [HttpPost("{id:int}/release")]
   public async Task<ActionResult<TransactionResponseDto>> ReleaseTransaction(
-    int id,
-    CancellationToken cancellationToken)
+      int id,
+      CancellationToken cancellationToken)
   {
     if (!CanHandleMoney)
-      return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only social workers and admins can release claims." });
+    {
+      return StatusCode(StatusCodes.Status403Forbidden, new
+      {
+        message = "Only Social Workers and admins can release claims."
+      });
+    }
 
-    var transaction = await LoadAsync(id, cancellationToken, tracking: true);
+    var transaction = await LoadAsync(
+        id,
+        cancellationToken,
+        tracking: true);
+
     if (transaction is null)
       return NotFound(new { message = "Transaction not found." });
+
     if (ClaimRules.IsCancelled(transaction))
       return Conflict(new { message = "This claim was cancelled." });
+
+    if (transaction.ApprovalStatusId != 3)
+    {
+      return Conflict(new
+      {
+        message = "Only approved claims can be released."
+      });
+    }
+
+    // Only the original assigned Social Worker or an admin may release.
+    if (!IsAdmin && transaction.SocialWorkerUserId != currentUser.Id)
+      return Forbid();
+
     if (transaction.IsReleased == true)
-      return Conflict(new { message = "This claim is already released." });
+    {
+      return Conflict(new
+      {
+        message = "This claim has already been released."
+      });
+    }
 
     var previousIsReleased = transaction.IsReleased;
     var previousReleasedBy = transaction.ReleasedBy;
     var previousDateReleased = transaction.DateReleased;
+
     var now = Now();
+
     transaction.IsReleased = true;
     transaction.ReleasedBy = currentUser.Id;
     transaction.DateReleased = now;
+
     Touch(transaction, now);
-    Log(transaction, "Released",
-      new Dictionary<string, object?>
-      {
-        ["isReleased"] = previousIsReleased,
-        ["releasedBy"] = previousReleasedBy,
-        ["dateReleased"] = previousDateReleased,
-      },
-      new Dictionary<string, object?>
-      {
-        ["isReleased"] = transaction.IsReleased,
-        ["releasedBy"] = transaction.ReleasedBy,
-        ["dateReleased"] = transaction.DateReleased,
-      },
-      null, now);
+
+    Log(
+        transaction,
+        "Released",
+        new Dictionary<string, object?>
+        {
+          ["isReleased"] = previousIsReleased,
+          ["releasedBy"] = previousReleasedBy,
+          ["dateReleased"] = previousDateReleased
+        },
+        new Dictionary<string, object?>
+        {
+          ["isReleased"] = transaction.IsReleased,
+          ["releasedBy"] = transaction.ReleasedBy,
+          ["dateReleased"] = transaction.DateReleased
+        },
+        null,
+        now);
+
     if (!await TrySaveAsync(cancellationToken))
       return Changed();
 
     return Ok(TransactionResponseMapper.ToResponse(transaction));
   }
+
 
   [HttpPost("{id:int}/cancel")]
   public Task<IActionResult> Cancel(int id, ReasonRequest request, CancellationToken cancellationToken) =>

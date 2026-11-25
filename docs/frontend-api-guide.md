@@ -304,6 +304,14 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 - While a claim is with the approvers or approved, save is 409 for everyone.
 - Whoever worked on a claim (held it, took it over, sent it, or set its amount) can't approve it, admins included
   (403 "You worked on this claim, so another approver has to approve it.").
+- Approving gives the claim its control number in `refNo`, `{program}-{MM}-{DD}-{YY}-{n}` (e.g. `A-11-25-26-3`),
+  counted per program per claim date. A claim that already has one keeps it. Two approvals saving at the same
+  moment: one may get 409 "try again".
+- `POST /api/transactions/{id}/print` returns the guarantee letter / credit slip: `title` ("Guarantee Letter" or
+  "Credit Slip"), `controlNo`, `date`, `creditorName`, `patientName`, `address`, `representativeName`,
+  `programDesc`, `needs`, `amount`, `fundSource`, `socialWorkerName`, `approverName`, `approvedDate`, `reprint`.
+  Approved claims only, not Cash (409). The claim's social worker, approvers and admins (403 otherwise). Every call
+  is logged as `Printed`; `reprint` is true after the first. Printing doesn't release, release stays its own call.
 - The fund source must be for the claim's year. Only admins move a claim to another day.
 - Send dates as picked (`2026-11-17T09:00`). UTC (`...Z`) is turned into PH time.
 - Cancelled claims are hidden from lists and totals, and can't be edited.

@@ -2,6 +2,8 @@ using Claims.API.Auth;
 using Claims.API.DTOs.Queue;
 using Claims.API.DTOs.Transactions;
 using Claims.API.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 

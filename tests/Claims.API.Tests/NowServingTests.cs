@@ -66,7 +66,7 @@ public class NowServingTests
       new ModeOfAssistance { ModeId = 2, ModeDesc = "Cash" },
       new ModeOfAssistance { ModeId = 3, ModeDesc = "Guarantee Letter" });
     await db.SaveChangesAsync();
-    await db.Database.ExecuteSqlRawAsync("INSERT INTO Assistance (AssistanceID, AssistanceCode, AssistanceType) VALUES (1, 'AICS', 'AICS')");
+    await db.AddProgramsAsync(("AICS", "AICS"));
     o.S = s.LaneTypeId;
     o.PatientId = patient.PersonId;
     o.Desk1 = desk1.DeskId;
@@ -102,7 +102,7 @@ public class NowServingTests
   {
     Assert.Equal(HttpStatusCode.NoContent, (await worker.PostAsJsonAsync("/api/transactions/save",
       new { transactionId = id, amount = 2500m, assistanceCode = "AICS", modeId = 3, creditorId = 501 })).StatusCode);
-    Assert.Equal(HttpStatusCode.OK, (await worker.PostAsync($"/api/transactions/{id}/send-for-approval", null)).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await worker.PostAsync($"/api/transactions/{id}/submit-for-approval", null)).StatusCode);
   }
 
   private static async Task<List<TransactionHistoryDto>> History(Office o, int id) =>
@@ -163,13 +163,9 @@ public class NowServingTests
     Assert.Equal(HttpStatusCode.Conflict, waiting.StatusCode);
     Assert.Equal("This claim is waiting for approval.", await Message(waiting));
 
-    await o.Approver.PostAsJsonAsync($"/api/transactions/{id}/return", new { reason = "Check the bill" });
+    Assert.Equal(HttpStatusCode.OK, (await o.Approver.PostAsync($"/api/transactions/{id}/approve", null)).StatusCode);
     Assert.Equal(HttpStatusCode.NoContent, (await Recall(o.Worker, id, o.Desk1)).StatusCode);
     Assert.Contains($"\"deskId\":{o.Desk1}", (await History(o, id)).Last(h => h.Action == "Recalled").NewValues);
-
-    Assert.Equal(HttpStatusCode.OK, (await o.Worker.PostAsync($"/api/transactions/{id}/send-for-approval", null)).StatusCode);
-    await o.Approver.PostAsync($"/api/transactions/{id}/approve", null);
-    Assert.Equal(HttpStatusCode.NoContent, (await Recall(o.Worker, id)).StatusCode);
 
     var other = await FileAsync(o);
     await CallAsync(o.Worker2, o.Desk1);
@@ -266,7 +262,7 @@ public class NowServingTests
     Assert.Equal("Desk 2", call.Desk);
     Assert.Equal("S1", call.Code);
 
-    Assert.Equal(HttpStatusCode.OK, (await o.Worker.GetAsync($"/api/transactions/{id}/document")).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await o.Worker.PostAsync($"/api/transactions/{id}/print", null)).StatusCode);
     Assert.Empty((await NowServingAsync(o.Tv)).Calls);
 
     o.App.Clock.Advance(TimeSpan.FromMinutes(1));

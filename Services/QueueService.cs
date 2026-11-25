@@ -209,7 +209,7 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
   private const int TvRows = 8;
   private static readonly TimeSpan CallBackShown = TimeSpan.FromMinutes(15);
   // after these a call-back has done its job and leaves the TV
-  private static readonly string[] CallBackDone = [ApprovalService.Printed, ApprovalService.Released, ApprovalService.SentForApproval];
+  private static readonly string[] CallBackDone = ["Printed", "Released", "SubmittedForApproval"];
 
   /// <summary>What the waiting-area TV shows: codes and desks only.</summary>
   public async Task<NowServingDto> NowServingAsync(CancellationToken ct)

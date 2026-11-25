@@ -743,8 +743,23 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
     var previousStatus = transaction.ApprovalStatusId;
     var previousApprovedBy = transaction.ApprovedBy;
     var previousDateApproved = transaction.DateApproved;
+    var previousRefNo = transaction.RefNo;
 
     var now = Now();
+
+    await using var numbering = await context.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+    try
+    {
+      await ControlNumbers.LockAsync(context, cancellationToken);
+      // a claim that already has a number (reopened, or typed in the old system) keeps it
+      if (string.IsNullOrWhiteSpace(transaction.RefNo) && !string.IsNullOrWhiteSpace(transaction.AssistanceCode))
+        transaction.RefNo = await ControlNumbers.NextAsync(
+          context, transaction.AssistanceCode, (transaction.Date ?? now).Date, cancellationToken);
+    }
+    catch (Microsoft.Data.SqlClient.SqlException e) when (e.Number is ControlNumbers.LockNotGranted or 1205 or 1222)
+    {
+      return Conflict(new { message = "Another approval was saving at the same time. Try again." });
+    }
 
     transaction.ApprovalStatusId = 3;
     transaction.ApprovedBy = currentUser.Id;
@@ -763,19 +778,22 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
         {
             ["approvalStatusId"] = previousStatus,
             ["approvedBy"] = previousApprovedBy,
-            ["dateApproved"] = previousDateApproved
+            ["dateApproved"] = previousDateApproved,
+            ["refNo"] = previousRefNo
         },
         new Dictionary<string, object?>
         {
             ["approvalStatusId"] = transaction.ApprovalStatusId,
             ["approvedBy"] = transaction.ApprovedBy,
-            ["dateApproved"] = transaction.DateApproved
+            ["dateApproved"] = transaction.DateApproved,
+            ["refNo"] = transaction.RefNo
         },
         null,
         now);
 
     if (!await TrySaveAsync(cancellationToken))
         return Changed();
+    await numbering.CommitAsync(cancellationToken);
 
     return Ok(TransactionResponseMapper.ToResponse(transaction));
 }
@@ -1027,6 +1045,86 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
     || allocation.CreditorId is not null
     || allocation.ModeId is not null
     || allocation.Amount is not null;
+
+  // the paper the client brings to the creditor; every print is logged so later copies say reprint
+  [HttpPost("{id:int}/print")]
+  public async Task<ActionResult<ClaimDocumentDto>> Print(int id, CancellationToken cancellationToken)
+  {
+    var claim = await WithDetails(context.Transactions)
+      .Include(x => x.TransactionServices).ThenInclude(service => service.Nature)
+      .Include(x => x.ApprovedByNavigation)
+      .AsNoTracking()
+      .FirstOrDefaultAsync(x => x.TransactionId == id, cancellationToken);
+    if (claim is null)
+      return NotFound(new { message = "Transaction not found." });
+    if (!CanApprove && claim.SocialWorkerUserId != currentUser.Id)
+      return StatusCode(StatusCodes.Status403Forbidden, new
+      {
+        message = "Only the social worker on this claim, an approver or an admin can print it."
+      });
+    if (ClaimRules.IsCancelled(claim))
+      return Conflict(new { message = "This claim was cancelled." });
+    if (claim.ApprovalStatusId != 3)
+      return Conflict(new { message = "Only approved claims can be printed." });
+
+    var money = TransactionResponseMapper.ToResponse(claim);
+    if (money.ModeId == CashModeId)
+      return Conflict(new { message = "Cash claims have no letter or slip." });
+
+    var code = claim.AssistanceCode?.Trim().ToUpper();
+    var program = await context.SourceOfAssistances
+      .Where(x => x.SourceCode != null && x.SourceCode.Trim().ToUpper() == code)
+      .Select(x => x.SourceDesc)
+      .FirstOrDefaultAsync(cancellationToken);
+    var reprint = await context.AuditLogs.AnyAsync(
+      x => x.Entity == Entity && x.EntityId == id && x.Action == Printed, cancellationToken);
+    var now = Now();
+    var patient = claim.PatientPerson;
+
+    var document = new ClaimDocumentDto(
+      money.ModeId == CreditSlipModeId ? "Credit Slip" : "Guarantee Letter",
+      claim.RefNo ?? "",
+      claim.Date ?? claim.DateApproved ?? now,
+      money.CreditorName,
+      PersonName(patient),
+      JoinParts(patient?.NoBuildingName, patient?.Street, patient?.PurokSubdivision, patient?.Barangay, patient?.Municipality),
+      claim.RepresentativePerson is { } rep ? PersonName(rep) : claim.Representative?.Trim().ToUpperInvariant(),
+      program?.Trim(),
+      claim.TransactionServices
+        .Where(x => !string.IsNullOrWhiteSpace(x.Nature?.NatureDesc))
+        .Select(x => x.Nature!.NatureDesc!.Trim())
+        .Distinct()
+        .ToList(),
+      money.Amount ?? 0m,
+      money.SourceDesc,
+      SignatureName(claim.SocialWorkerUser),
+      SignatureName(claim.ApprovedByNavigation),
+      claim.DateApproved ?? now,
+      reprint);
+
+    Log(claim, Printed, null, null, reprint ? "Reprint" : null, now);
+    await context.SaveChangesAsync(cancellationToken);
+    return Ok(document);
+  }
+
+  private const string Printed = "Printed";
+  // ModeOfAssistance rows (checked on the office DB): 1 Credit Slip, 2 Cash, 3 Guarantee Letter
+  private const short CreditSlipModeId = 1;
+  private const short CashModeId = 2;
+
+  private static string PersonName(Person? p) => p is null ? "" :
+    string.Join(" ", new[] { p.FirstName, p.MiddleName, p.LastName }
+      .Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim())).ToUpperInvariant();
+
+  // accounts without a first/last name fall back to the login name
+  private static string? SignatureName(User? user) =>
+    user is null ? null : (FullName(user) is { Length: > 0 } name ? name : user.Username).ToUpperInvariant();
+
+  private static string? JoinParts(params string?[] parts)
+  {
+    var text = string.Join(", ", parts.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim()));
+    return text.Length == 0 ? null : text;
+  }
 
   private async Task<bool> TrySaveAsync(CancellationToken ct)
   {

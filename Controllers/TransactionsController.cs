@@ -39,6 +39,16 @@ public class TransactionsController(
 
   private const string NeedsBirthdate = "Set the client's birthdate or approximate age before releasing.";
 
+  private static readonly string[] WorkActions = ["CheckedOut", "TakenOver", "SubmittedForApproval"];
+
+  // held it, took it, sent it, or set its amount
+  private async Task<bool> WorkedOnAsync(Transaction transaction, CancellationToken ct) =>
+    transaction.SocialWorkerUserId == currentUser.Id
+    || await context.AuditLogs.AnyAsync(a => a.Entity == Entity && a.EntityId == transaction.TransactionId
+      && a.UserId == currentUser.Id
+      && (WorkActions.Contains(a.Action)
+        || ((a.Action == "Created" || a.Action == "Updated") && a.NewValues != null && a.NewValues.Contains("\"amount\""))), ct);
+
   private Task<bool> HasBirthdateAsync(int? personId, CancellationToken ct) =>
     context.People.AnyAsync(p => p.PersonId == personId && p.Birthdate != null, ct);
 
@@ -196,7 +206,6 @@ public class TransactionsController(
         });
 
     }
-
 
     if (parameters.StartDate.HasValue)
     {
@@ -389,6 +398,11 @@ public class TransactionsController(
       if (next.IsReleased != false || changed.Any(k => k != "isReleased"))
         return Conflict(new { message = "Reopen the claim first, then make the changes." });
     }
+    // what the approver saw is what gets released
+    else if (transaction?.ApprovalStatusId == ApprovalStatuses.Waiting)
+      return Conflict(new { message = "This claim is with the approvers. It can't change until they decide." });
+    else if (transaction?.ApprovalStatusId == ApprovalStatuses.Approved)
+      return Conflict(new { message = "This claim is already approved, so it can't change now." });
 
     if (!CanHandleMoney && changed.Any(k => MoneyFields.Contains(k)
         && (isNew ? after[k] is not null and not false : true)))
@@ -412,6 +426,9 @@ public class TransactionsController(
         message = $"{FullName(holder) ?? "Another social worker"} is handling this claim.",
       });
     }
+
+    if (!wasReleased && next.IsReleased == true)
+      return Conflict(new { message = "Send the claim for approval, then release it once it's approved." });
 
     var problem = await ValidateAsync(next, nextAllocation, natureIds, transaction, changed, cancellationToken);
     if (problem is not null)
@@ -489,6 +506,10 @@ public class TransactionsController(
     transaction.Remarks = next.Remarks;
     transaction.IsReleased = next.IsReleased;
     transaction.AssistanceCode = next.AssistanceCode;
+    // a reopened claim goes through approval again
+    var oldStatus = transaction.ApprovalStatusId;
+    if (wasReleased)
+      transaction.ApprovalStatusId = ApprovalStatuses.Pending;
 
     if (changed.Contains("natureIds"))
     {
@@ -546,14 +567,15 @@ public class TransactionsController(
     if (!await TrySaveAsync(cancellationToken))
       return Changed();
 
-    var action = isNew ? "Created"
-      : !wasReleased && next.IsReleased == true ? "Released"
-      : wasReleased ? "Reopened"
-      : "Updated";
-    Log(transaction, action,
-      isNew ? null : changed.ToDictionary(k => k, k => before.GetValueOrDefault(k)),
-      changed.ToDictionary(k => k, k => after[k]),
-      null, now);
+    var action = isNew ? "Created" : wasReleased ? "Reopened" : "Updated";
+    var oldValues = isNew ? null : changed.ToDictionary(k => k, k => before.GetValueOrDefault(k));
+    var newValues = changed.ToDictionary(k => k, k => after[k]);
+    if (wasReleased)
+    {
+      oldValues!["approvalStatusId"] = oldStatus;
+      newValues["approvalStatusId"] = transaction.ApprovalStatusId;
+    }
+    Log(transaction, action, oldValues, newValues, null, now);
     await context.SaveChangesAsync(cancellationToken);
     await dbTransaction.CommitAsync(cancellationToken);
 
@@ -643,9 +665,17 @@ public class TransactionsController(
       return Forbid();
     }
 
-
+    if (transaction.ApprovalStatusId == ApprovalStatuses.Approved)
+      return Conflict(new { message = "This claim is already approved." });
     if (transaction.ApprovalStatusId == 2)
       return Ok(TransactionResponseMapper.ToResponse(transaction));
+
+    if (string.IsNullOrWhiteSpace(transaction.AssistanceCode))
+      return BadRequest(new { message = "Set the program before sending the claim for approval." });
+    if (!transaction.TransactionServices.SelectMany(x => x.ServiceFundAllocations).Any(a => a.Status && a.Amount > 0))
+      return BadRequest(new { message = "Set the amount before sending the claim for approval." });
+    if (!await HasBirthdateAsync(transaction.PatientPersonId, cancellationToken))
+      return BadRequest(new { message = "Set the client's birthdate or approximate age before sending the claim for approval." });
 
     var previous = transaction.ApprovalStatusId;
     var now = Now();
@@ -698,6 +728,15 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
         return Conflict(new
         {
             message = "Only claims submitted for approval can be approved."
+        });
+    }
+
+    // maker-checker: whoever worked on the claim can't approve it, admins included
+    if (await WorkedOnAsync(transaction, cancellationToken))
+    {
+        return StatusCode(StatusCodes.Status403Forbidden, new
+        {
+            message = "You worked on this claim, so another approver has to approve it."
         });
     }
 
@@ -823,7 +862,6 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
 
     return Ok(TransactionResponseMapper.ToResponse(transaction));
   }
-
 
   [HttpPost("{id:int}/cancel")]
   public Task<IActionResult> Cancel(int id, ReasonRequest request, CancellationToken cancellationToken) =>
@@ -954,14 +992,6 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
       if (!await context.SourceOfAssistances.AnyAsync(x => x.SourceCode != null && x.SourceCode.Trim().ToUpper() == code, ct))
         return "Program was not found.";
     }
-
-    if (next.IsReleased == true && current?.IsReleased != true && nextAllocation.Amount is null)
-      return "Set the amount before releasing the claim.";
-    if (next.IsReleased == true && current?.IsReleased != true && next.AssistanceCode is null)
-      return "Set the program before releasing the claim.";
-    // every release, old claims too: this is how the missing birthdates get filled in
-    if (next.IsReleased == true && current?.IsReleased != true && !await HasBirthdateAsync(next.PatientPersonId, ct))
-      return NeedsBirthdate;
 
     if (Changed("natureIds") && natureIds.Count > 0)
     {

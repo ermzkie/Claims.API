@@ -161,11 +161,12 @@ public class QueueTests
       : null;
   }
 
-  private static async Task ReleaseAsync(HttpClient client, int id)
+  // released the only way there is: sent, approved by the admin, released by the worker
+  private static async Task ReleaseAsync(Office o, int id)
   {
-    var response = await client.PostAsJsonAsync("/api/transactions/save",
-      new { transactionId = id, amount = 100m, assistanceCode = "AICS", isReleased = true });
-    Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    await SendForApprovalAsync(o.Worker, id);
+    Assert.Equal(HttpStatusCode.OK, (await o.Admin.PostAsync($"/api/transactions/{id}/approve", null)).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await o.Worker.PostAsync($"/api/transactions/{id}/release", null)).StatusCode);
   }
 
   [Fact]
@@ -178,10 +179,10 @@ public class QueueTests
 
     var first = await NextAsync(o.Worker);
     Assert.Equal("S1", first!.QueueNoCode);
-    await ReleaseAsync(o.Worker, first.TransactionId);
+    await ReleaseAsync(o, first.TransactionId);
     var second = await NextAsync(o.Worker);
     Assert.Equal("V1", second!.QueueNoCode);
-    await ReleaseAsync(o.Worker, second.TransactionId);
+    await ReleaseAsync(o, second.TransactionId);
     Assert.Equal("R1", (await NextAsync(o.Worker))!.QueueNoCode);
   }
 
@@ -373,7 +374,7 @@ public class QueueTests
     await using var o = await SetupAsync();
     await FileAsync(o, o.S);
     var s1 = await NextAsync(o.Worker);
-    await ReleaseAsync(o.Worker, s1!.TransactionId);
+    await ReleaseAsync(o, s1!.TransactionId);
 
     Assert.Equal(HttpStatusCode.Conflict,
       (await o.Admin.PostAsJsonAsync($"/api/queue/{s1.TransactionId}/return", new { })).StatusCode);

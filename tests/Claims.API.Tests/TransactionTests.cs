@@ -64,10 +64,12 @@ public class TransactionTests
     {
       transactionId,
       amount = 200m,
-      isReleased = true,
       assistanceCode = "AICS",
     });
     Assert.Equal(HttpStatusCode.NoContent, update.StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await worker.PostAsync($"/api/transactions/{transactionId}/submit-for-approval", null)).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await admin.PostAsync($"/api/transactions/{transactionId}/approve", null)).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await worker.PostAsync($"/api/transactions/{transactionId}/release", null)).StatusCode);
 
     var updated = await worker.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{transactionId}");
     Assert.Equal(200m, updated!.Amount);
@@ -490,13 +492,14 @@ public class TransactionTests
     int forbiddenTransactionId;
     await using (var db = app.CreateDbContext())
     {
-      // only the worker holding the claim (or an admin) can send it
+      // only the worker holding the claim (or an admin) can send it; program, amount and birthdate are set
+      var client = new Person { FirstName = "MARIA", LastName = "SANTOS", Status = true, Birthdate = new DateOnly(1958, 3, 1) };
       var workerTransaction = new Transaction
-        { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = workerId };
+        { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = workerId, PatientPerson = client, AssistanceCode = "AICS" }.WithMoney(amount: 100m);
       var adminTransaction = new Transaction
-        { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = existingWorkerId };
+        { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = existingWorkerId, PatientPerson = client, AssistanceCode = "AICS" }.WithMoney(amount: 100m);
       var forbiddenTransaction = new Transaction
-        { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = existingWorkerId };
+        { Status = true, ApprovalStatusId = 1, SocialWorkerUserId = existingWorkerId, PatientPerson = client, AssistanceCode = "AICS" }.WithMoney(amount: 100m);
       db.Transactions.AddRange(workerTransaction, adminTransaction, forbiddenTransaction);
       await db.SaveChangesAsync();
       workerTransactionId = workerTransaction.TransactionId;

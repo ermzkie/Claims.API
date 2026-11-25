@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Claims.API.Models;
 
 [Table("AuditLog")]
+[Index("Action", "DateCreated", Name = "IX_AuditLog_Action_Date")]
 [Index("Entity", "EntityId", Name = "IX_AuditLog_Entity")]
 [Index("PersonId", Name = "IX_AuditLog_Person")]
 public partial class AuditLog

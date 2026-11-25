@@ -188,7 +188,8 @@ public class PersonReviewTests
       db.Officers.Add(new Officer { Idnumber = 7, Name = " OLD WORKER ", Password = "not read" });
       db.Creditors.Add(new Creditor { CreditorId = 1, CreditorName = "HOSPITAL A", Status = true });
       var claim = db.Transactions.Single(t => t.TransactionId == 7);
-      (claim.SocialWorkerId, claim.CreditorId, claim.Amount, claim.Representative) = ("7", 1, 1500m, " LOPEZ, BEN ");
+      (claim.SocialWorkerId, claim.Representative) = ("7", " LOPEZ, BEN ");
+      claim.WithMoney(amount: 1500m, creditorId: 1);
       await db.SaveChangesAsync();
     }
 

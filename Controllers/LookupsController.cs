@@ -115,12 +115,11 @@ public class LookupsController(ApplicationDbContext context) : ControllerBase
       .ToListAsync();
   }
 
-  // Assistance has a row per budget period
   [HttpGet("assistance-programs")]
   public async Task<ActionResult<List<AssistanceProgramDto>>> AssistancePrograms() =>
-    (await context.Assistances.AsNoTracking()
-      .Where(x => x.AssistanceCode != null && x.AssistanceType != null)
-      .Select(x => new { x.AssistanceCode, x.AssistanceType })
+    (await context.SourceOfAssistances.AsNoTracking()
+      .Where(source => source.SourceCode != null && source.SourceDesc != null)
+      .Select(source => new { AssistanceCode = source.SourceCode, AssistanceType = source.SourceDesc })
       .ToListAsync())
       .GroupBy(x => x.AssistanceCode!.Trim().ToUpperInvariant())
       .Select(g => new AssistanceProgramDto(g.Key, g.First().AssistanceType!.Trim()))

@@ -26,17 +26,15 @@ public class CreditorSummaryTests
       db.People.Add(new Person { PersonId = 10, LastName = "SANTOS", FirstName = "MARIA", MiddleName = "CRUZ", Status = true });
 
       db.Transactions.AddRange(
-        new Transaction { TransactionId = 101, CreditorId = 1, Status = true, Amount = 1000m, Date = new DateTime(2025, 3, 1), RefNo = "A-1", PatientPersonId = 10, AssistanceCode = "A" },
-        new Transaction { TransactionId = 102, CreditorId = 1, Status = true, Amount = 2500.50m, Date = new DateTime(2026, 10, 5), RefNo = "A-2" },
-        new Transaction { TransactionId = 103, CreditorId = 1, Status = true, Amount = 300m, Date = new DateTime(2026, 11, 9), RefNo = "A-3" },
-        new Transaction { TransactionId = 104, CreditorId = 1, Status = true, Amount = 50m, Date = null, RefNo = "A-4" },
-        new Transaction { TransactionId = 105, CreditorId = 1, Status = false, CreatedBy = userId, Amount = 9999m, Date = new DateTime(2026, 1, 1), RefNo = "A-DELETED" },
-        new Transaction { TransactionId = 201, CreditorId = 2, Status = true, Amount = 75m, Date = new DateTime(2024, 6, 1) },
-        new Transaction { TransactionId = 301, CreditorId = null, Status = true, Amount = 5m });
+        new Transaction { TransactionId = 101, Status = true, Date = new DateTime(2025, 3, 1), RefNo = "A-1", PatientPersonId = 10, AssistanceCode = "A" }.WithMoney(creditorId: 1, amount: 1000m).Released(),
+        new Transaction { TransactionId = 102, Status = true, Date = new DateTime(2026, 10, 5), RefNo = "A-2" }.WithMoney(creditorId: 1, amount: 2500.50m).Released(),
+        new Transaction { TransactionId = 103, Status = true, Date = new DateTime(2026, 11, 9), RefNo = "A-3" }.WithMoney(creditorId: 1, amount: 300m).Released(),
+        new Transaction { TransactionId = 104, Status = true, Date = null, RefNo = "A-4" }.WithMoney(creditorId: 1, amount: 50m).Released(),
+        new Transaction { TransactionId = 105, Status = false, CreatedBy = userId, Date = new DateTime(2026, 1, 1), RefNo = "A-DELETED" }.WithMoney(creditorId: 1, amount: 9999m),
+        new Transaction { TransactionId = 201, Status = true, Date = new DateTime(2024, 6, 1) }.WithMoney(creditorId: 2, amount: 75m).Released(),
+        new Transaction { TransactionId = 301, Status = true, }.WithMoney(creditorId: null, amount: 5m).Released());
       await db.SaveChangesAsync();
-      // Assistance has no key in the model, so it can only be seeded with SQL.
-      await db.Database.ExecuteSqlRawAsync(
-        "INSERT INTO Assistance (AssistanceID, AssistanceCode, AssistanceType) VALUES (1, 'A', 'AICS')");
+      await db.AddProgramsAsync(("A", "AICS"));
     }
     return (app, await LoginAsAsync(app, "fl", Pw));
   }

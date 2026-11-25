@@ -32,3 +32,11 @@ public record QueueTodayDto(
   int Done);
 
 public record QueueReasonRequest(string? Reason);
+
+// optional desk of the computer making the call
+public record QueueCallRequest(int? DeskId);
+
+// the waiting-area TV: codes and desks only, never names
+public record NowServingCallDto(string Code, string? Desk, DateTime CalledAt, bool IsRecall);
+
+public record NowServingDto(DateTime ServerTime, List<NowServingCallDto> Calls, List<string> Next);

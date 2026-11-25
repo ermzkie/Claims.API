@@ -11,6 +11,7 @@ public static class AuthPolicies
   public const string UserAdmin = "UserAdmin";
   // claims, money and reports: not for the front desk
   public const string ClaimsViewer = "ClaimsViewer";
+  public const string QueueDisplay = "QueueDisplay";
   public const string AllowPendingPasswordChange = "AllowPendingPasswordChange";
 
   public static IServiceCollection AddClaimsAuthentication(this IServiceCollection services, IConfiguration configuration)
@@ -71,9 +72,12 @@ public static class AuthPolicies
     var basePolicy = new AuthorizationPolicyBuilder()
       .RequireAuthenticatedUser()
       .AddRequirements(new PasswordChangeRequirement())
+      // every endpoint refuses a TV account unless it opts in (QueueDisplay below)
+      .AddRequirements(new DisplayOnlyRequirement())
       .Build();
 
     services.AddSingleton<IAuthorizationHandler, PasswordChangeHandler>();
+    services.AddSingleton<IAuthorizationHandler, DisplayOnlyHandler>();
     services.AddSingleton<IAuthorizationMiddlewareResultHandler, AuthorizationResultHandler>();
 
     services.AddAuthorizationBuilder()
@@ -87,6 +91,13 @@ public static class AuthPolicies
         .Combine(basePolicy)
         // approvers need to see what they approve
         .RequireRole(RoleNames.SocialWorker, RoleNames.Approver, RoleNames.SuperAdministrator, RoleNames.Administrator)
+        .Build())
+      // the TV feed: the one place a Display account may read
+      .AddPolicy(QueueDisplay, new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .AddRequirements(new PasswordChangeRequirement())
+        .RequireRole(RoleNames.Display, RoleNames.Frontliner, RoleNames.SocialWorker, RoleNames.Approver,
+          RoleNames.SuperAdministrator, RoleNames.Administrator)
         .Build())
       .AddPolicy(AllowPendingPasswordChange, policy => policy
         .RequireAuthenticatedUser());

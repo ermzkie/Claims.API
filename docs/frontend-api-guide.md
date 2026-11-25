@@ -222,7 +222,11 @@ pages added to `routes.js` are protected automatically.
 | POST                | `/api/transactions/save`         | logged in           | Create (201) or edit (204, with `transactionId`). On edit, fields left out keep their value; blank text clears it. Money side is Social Worker / admins |
 | POST                | `/api/transactions/{id}/checkout-social-worker` | Social Worker / admins | Take the claim. Someone else has it: 409 with their name; send `{ takeOver: true, reason }` to take it over |
 | GET                 | `/api/queue/today`               | logged in           | Today's queue: `{ day, serverTime, nextQueueCode, lanes: [{ laneTypeId, code, name, waiting: [], serving: [], done }], notServed: [], waiting, serving, done }`. Lanes come in serving order |
-| POST                | `/api/queue/next`                | Social Worker / admins | Take the next client: 200 with the claim, 204 when nobody waits, 409 `{ message, transactionId }` while you still serve one |
+| POST                | `/api/queue/next`                | Social Worker / admins | Take the next client: 200 with the claim, 204 when nobody waits, 409 `{ message, transactionId }` while you still serve one. Optional body `{ deskId }` (this computer's desk; inactive desk 400) |
+| POST                | `/api/queue/{id}/recall`         | holder / admins     | Call the client again (204), body `{ deskId? }` (else the desk of the last call). Serving, Returned or Approved claims; 409 while waiting for approval |
+| GET                 | `/api/queue/now-serving`         | staff and Display   | The TV feed: `{ serverTime, calls: [{ code, desk, calledAt, isRecall }], next: [code] }`, newest call first, up to 8 each. Codes and desks only. Call-backs (Returned / Approved) stay 15 minutes or until printed, released or sent again |
+| GET                 | `/api/desks`                     | staff               | Active desks `{ deskId, name, sortOrder, status }` for the desk picker |
+| GET / POST / PUT    | `/api/desks/all`, `/api/desks`, `/api/desks/{id}` | Admin / Super Admin | All desks; add `{ name, sortOrder, status }` (201); change (200). Name 1 to 30 characters, unique among active desks (409). Deactivate, don't delete |
 | POST                | `/api/queue/{id}/return`         | holder / admins     | Back to the queue, behind those waiting now. Body `{ reason? }` (204) |
 | POST                | `/api/queue/{id}/not-served`     | holder / admins     | Out of today's queue. Body `{ reason }` required (204). A checkout brings it back |
 | GET                 | `/api/lookups/fund-sources?year=` | logged in           | Active fund sources for that year `[{ id, name, year }]` |
@@ -286,6 +290,9 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 - Claims (list, details, history), dashboard, creditor totals and claims, reports and a person's claims:
   Social Worker and admins only. Frontliners get 403.
 - Creditor claims CSV export and the removed creditors list: admins only.
+- A Display account (Display role and nothing else) gets 403 everywhere except `/api/queue/now-serving` and the
+  auth endpoints. Its sign-in lasts 16 hours (others 8).
+- `checkout-social-worker` also takes `deskId`; a takeover keeps the desk of the last call.
 - Frontliners file new claims and can fix one until a social worker picks it up (403 after that).
   The money side stays social workers and admins only.
 - A frontliner (without other roles) edits person basics only: changing civil status, occupation or income,

@@ -217,4 +217,59 @@ public class AccessTests
     Assert.Equal(HttpStatusCode.Created,
       (await o.Worker.PostAsJsonAsync("/api/persons", new { firstName = "Ben", lastName = "Lim", estimatedMonthlyIncome = 5000m })).StatusCode);
   }
+
+  private static async Task<(ClaimsApiFactory App, HttpClient Tv)> DisplaySetupAsync()
+  {
+    var app = new ClaimsApiFactory();
+    await SeedRolesAsync(app);
+    await CreateUserAsync(app, "tv", Password, "Display");
+    return (app, await LoginAsAsync(app, "tv", Password));
+  }
+
+  [Fact]
+  public async Task Display_RefusedEverywhereButNowServing()
+  {
+    var (app, tv) = await DisplaySetupAsync();
+    await using var _ = app;
+    foreach (var url in new[]
+    {
+      "/api/queue/today", "/api/queue/mine", "/api/transactions", "/api/persons?search=a", "/api/desks", "/api/desks/all",
+      "/api/approvals", "/api/lookups/sexes", "/api/dashboard",
+    })
+      Assert.True((await tv.GetAsync(url)).StatusCode == HttpStatusCode.Forbidden, url);
+    Assert.Equal(HttpStatusCode.Forbidden, (await tv.PostAsync("/api/queue/next", null)).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await tv.GetAsync("/api/queue/now-serving")).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await tv.GetAsync("/api/auth/me")).StatusCode);
+  }
+
+  [Fact]
+  public async Task Display_WithAnotherRole_IsNotLocked()
+  {
+    var app = new ClaimsApiFactory();
+    await using var _ = app;
+    await SeedRolesAsync(app);
+    await CreateUserAsync(app, "tvfront", Password, "Display", "Frontliner");
+    using var client = await LoginAsAsync(app, "tvfront", Password);
+    Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/queue/today")).StatusCode);
+  }
+
+  [Fact]
+  public async Task Display_TokenLasts16Hours()
+  {
+    var app = new ClaimsApiFactory();
+    await using var _ = app;
+    await SeedRolesAsync(app);
+    await CreateUserAsync(app, "tv", Password, "Display");
+    await CreateUserAsync(app, "front", Password, "Frontliner");
+    using var anon = app.CreateClient();
+    async Task<TimeSpan> Lasts(string user)
+    {
+      var login = await anon.PostAsJsonAsync("/api/auth/login", new { username = user, password = Password });
+      var body = await login.Content.ReadFromJsonAsync<Dictionary<string, object>>();
+      return DateTime.Parse(body!["expiresAt"].ToString()!, null,
+        System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal) - app.Clock.GetUtcNow().UtcDateTime;
+    }
+    Assert.Equal(TimeSpan.FromHours(16), await Lasts("tv"));
+    Assert.Equal(TimeSpan.FromHours(8), await Lasts("front"));
+  }
 }

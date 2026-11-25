@@ -15,6 +15,7 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
   public const string TakenOver = "TakenOver";
   public const string ReturnedToQueue = "ReturnedToQueue";
   public const string NotServed = "NotServed";
+  public const string Recalled = "Recalled";
   private static readonly string[] QueueActions = [CheckedOut, TakenOver, ReturnedToQueue, NotServed];
 
   // seniors/PWD first, then VIP, then regular
@@ -131,11 +132,14 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
   }
 
   /// <summary>Gives the next waiting claim to the worker; null when nobody is waiting.</summary>
-  public async Task<int?> TakeNextAsync(int userId, CancellationToken ct) =>
-    await TakeFirstFreeAsync(userId, await WaitingOrderAsync(ct), ct);
+  public async Task<int?> TakeNextAsync(int userId, int? deskId, CancellationToken ct) =>
+    await TakeFirstFreeAsync(userId, await WaitingOrderAsync(ct), ct, deskId);
+
+  public Task<bool> DeskInUseAsync(int deskId, CancellationToken ct) =>
+    db.Desks.AnyAsync(d => d.DeskId == deskId && d.Status, ct);
 
   // the list can be out of date by the time we get here; the update below is what decides
-  public async Task<int?> TakeFirstFreeAsync(int userId, IReadOnlyList<int> order, CancellationToken ct)
+  public async Task<int?> TakeFirstFreeAsync(int userId, IReadOnlyList<int> order, CancellationToken ct, int? deskId = null)
   {
     foreach (var id in order)
     {
@@ -152,11 +156,117 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
         continue;
 
       var patientId = await db.Transactions.Where(t => t.TransactionId == id).Select(t => t.PatientPersonId).FirstAsync(ct);
-      db.AuditLogs.Add(LogEntry(id, patientId, CheckedOut, null, userId, null, userId, now));
+      db.AuditLogs.Add(LogEntry(id, patientId, CheckedOut, null, userId, null, userId, now, deskId));
       await db.SaveChangesAsync(ct);
       return id;
     }
     return null;
+  }
+
+  /// <summary>Calls the client again: while served, after a return, or after approval for the handover.</summary>
+  public async Task<QueueActionOutcome> RecallAsync(int id, int userId, bool isAdmin, int? deskId, CancellationToken ct)
+  {
+    var claim = await db.Transactions.FirstOrDefaultAsync(t => t.TransactionId == id, ct);
+    if (claim is null)
+      return QueueActionOutcome.NotFound;
+    if (ClaimRules.IsCancelled(claim))
+      return QueueActionOutcome.Closed;
+    if (claim.ApprovalStatusId == ApprovalStatuses.Waiting)
+      return QueueActionOutcome.InApproval;
+    if (claim.SocialWorkerUserId is null)
+      return QueueActionOutcome.NotServing;
+    if (claim.SocialWorkerUserId != userId && !isAdmin)
+      return QueueActionOutcome.Forbidden;
+
+    deskId ??= await LastDeskAsync(id, ct);
+    var now = Now();
+    db.AuditLogs.Add(LogEntry(id, claim.PatientPersonId, Recalled, null, claim.SocialWorkerUserId, null, userId, now, deskId));
+    await db.SaveChangesAsync(ct);
+    return QueueActionOutcome.Ok;
+  }
+
+  private static readonly string[] CallActions = [CheckedOut, Recalled];
+
+  private async Task<int?> LastDeskAsync(int id, CancellationToken ct)
+  {
+    var values = await db.AuditLogs.AsNoTracking()
+      .Where(a => a.Entity == Entity && a.EntityId == id && CallActions.Contains(a.Action) && a.NewValues != null)
+      .OrderByDescending(a => a.DateCreated).ThenByDescending(a => a.AuditLogId)
+      .Select(a => a.NewValues)
+      .ToListAsync(ct);
+    return values.Select(DeskOf).FirstOrDefault(d => d is not null);
+  }
+
+  internal static int? DeskOf(string? newValues)
+  {
+    if (string.IsNullOrEmpty(newValues))
+      return null;
+    using var doc = System.Text.Json.JsonDocument.Parse(newValues);
+    return doc.RootElement.TryGetProperty("deskId", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.Number
+      ? d.GetInt32() : null;
+  }
+
+  private const int TvRows = 8;
+  private static readonly TimeSpan CallBackShown = TimeSpan.FromMinutes(15);
+  // after these a call-back has done its job and leaves the TV
+  private static readonly string[] CallBackDone = ["Printed", "Released", "SubmittedForApproval"];
+
+  /// <summary>What the waiting-area TV shows: codes and desks only.</summary>
+  public async Task<NowServingDto> NowServingAsync(CancellationToken ct)
+  {
+    var now = Now();
+    var rows = await TodayRowsAsync(ct);
+    var serving = rows.Where(r => r.State == State.Serving).ToList();
+
+    // handover and fix-up call-backs: any day, recalled in the last 15 minutes
+    var since = now - CallBackShown;
+    var recalledIds = await db.AuditLogs.AsNoTracking()
+      .Where(a => a.Entity == Entity && a.Action == Recalled && a.DateCreated >= since)
+      .Select(a => a.EntityId).Distinct().ToListAsync(ct);
+    var callBacks = await db.Transactions.AsNoTracking()
+      .Where(ClaimRules.Counted)
+      .Where(t => recalledIds.Contains(t.TransactionId)
+        && (t.ApprovalStatusId == ApprovalStatuses.Returned || t.ApprovalStatusId == ApprovalStatuses.Approved))
+      .Include(t => t.LaneType)
+      .ToListAsync(ct);
+
+    var ids = serving.Select(r => r.Claim.TransactionId).Concat(callBacks.Select(c => c.TransactionId)).ToList();
+    var logs = (await db.AuditLogs.AsNoTracking()
+        .Where(a => a.Entity == Entity && ids.Contains(a.EntityId)
+          && (CallActions.Contains(a.Action) || CallBackDone.Contains(a.Action)))
+        .Select(a => new { a.EntityId, a.Action, a.NewValues, a.DateCreated, a.AuditLogId })
+        .ToListAsync(ct))
+      .ToLookup(a => a.EntityId);
+
+    var calls = new List<(NowServingCallDto Call, int? DeskId, int Order)>();
+    foreach (var r in serving)
+    {
+      var call = logs[r.Claim.TransactionId].Where(a => CallActions.Contains(a.Action)).MaxBy(a => a.AuditLogId);
+      calls.Add((new NowServingCallDto(r.Code, null, call?.DateCreated ?? r.Since ?? now, call?.Action == Recalled),
+        DeskOf(call?.NewValues), call?.AuditLogId ?? 0));
+    }
+    foreach (var c in callBacks)
+    {
+      var mine = logs[c.TransactionId].OrderBy(a => a.AuditLogId).ToList();
+      var recall = mine.LastOrDefault(a => a.Action == Recalled);
+      if (recall is null || recall.DateCreated < since || mine.Any(a => a.AuditLogId > recall.AuditLogId && CallBackDone.Contains(a.Action)))
+        continue;
+      var code = $"{c.LaneType?.LaneTypeCode?.Trim()}{c.QueueNo}";
+      calls.Add((new NowServingCallDto(code, null, recall.DateCreated, true), DeskOf(recall.NewValues), recall.AuditLogId));
+    }
+
+    var deskIds = calls.Select(c => c.DeskId).OfType<int>().Distinct().ToList();
+    var desks = await db.Desks.AsNoTracking().Where(d => deskIds.Contains(d.DeskId))
+      .ToDictionaryAsync(d => d.DeskId, d => d.DeskName, ct);
+
+    return new NowServingDto(
+      now,
+      calls
+        .OrderByDescending(c => c.Call.CalledAt).ThenByDescending(c => c.Order)
+        .Take(TvRows)
+        .Select(c => c.Call with { Desk = c.DeskId is { } d ? desks.GetValueOrDefault(d) : null })
+        .ToList(),
+      InServingOrder(rows.Where(r => r.State == State.Waiting)).Take(TvRows).Select(r => r.Code).ToList());
   }
 
   /// <summary>Takes the claim off its worker: back to the queue, or out of it as not served.</summary>
@@ -186,14 +296,18 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
   }
 
   public static AuditLog LogEntry(
-    int transactionId, int? patientId, string action, int? oldWorker, int? newWorker, string? remark, int userId, DateTime now) => new()
+    int transactionId, int? patientId, string action, int? oldWorker, int? newWorker, string? remark, int userId, DateTime now,
+    int? deskId = null) => new()
   {
     Entity = Entity,
     EntityId = transactionId,
     PersonId = patientId,
     Action = action,
     OldValues = oldWorker is null ? null : System.Text.Json.JsonSerializer.Serialize(new { socialWorkerUserId = oldWorker }),
-    NewValues = newWorker is null ? null : System.Text.Json.JsonSerializer.Serialize(new { socialWorkerUserId = newWorker }),
+    // the desk of a call is what the TV shows
+    NewValues = newWorker is null ? null
+      : deskId is null ? System.Text.Json.JsonSerializer.Serialize(new { socialWorkerUserId = newWorker })
+      : System.Text.Json.JsonSerializer.Serialize(new { socialWorkerUserId = newWorker, deskId }),
     Remark = remark,
     UserId = userId,
     DateCreated = now,

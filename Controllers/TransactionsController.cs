@@ -599,6 +599,9 @@ public class TransactionsController(
     if (!CanHandleMoney)
       return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only social workers and admins can check out claims." });
 
+    if (request?.DeskId is { } deskId && !await context.Desks.AnyAsync(d => d.DeskId == deskId && d.Status, cancellationToken))
+      return BadRequest(new { message = "That desk isn't in use." });
+
     var transaction = await LoadAsync(id, cancellationToken, tracking: true);
     if (transaction is null)
       return NotFound(new { message = "Transaction not found." });
@@ -634,7 +637,10 @@ public class TransactionsController(
     Touch(transaction, now);
     Log(transaction, previous is null ? "CheckedOut" : "TakenOver",
       previous is null ? null : new Dictionary<string, object?> { ["socialWorkerUserId"] = previous },
-      new Dictionary<string, object?> { ["socialWorkerUserId"] = currentUser.Id },
+      // a takeover keeps the client where they are, so only a plain checkout carries a desk
+      previous is null && request?.DeskId is not null
+        ? new Dictionary<string, object?> { ["socialWorkerUserId"] = currentUser.Id, ["deskId"] = request.DeskId }
+        : new Dictionary<string, object?> { ["socialWorkerUserId"] = currentUser.Id },
       // a plain checkout can carry a note too, e.g. bringing back a client marked not served
       string.IsNullOrEmpty(reason) ? null : reason, now);
     if (!await TrySaveAsync(cancellationToken))

@@ -76,6 +76,7 @@ public class QueueController(QueueService queue, ICurrentUser currentUser) : Con
       QueueActionOutcome.Forbidden => StatusCode(StatusCodes.Status403Forbidden,
         new { message = "Only the social worker serving this client, or an admin, can do this." }),
       QueueActionOutcome.NotServing => Conflict(new { message = "This claim isn't being served." }),
+      QueueActionOutcome.InApproval => Conflict(new { message = "This claim was sent for approval, it's out of the queue." }),
       _ => Conflict(new { message = "This claim is already released or cancelled." }),
     };
   }

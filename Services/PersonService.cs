@@ -109,7 +109,7 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
       .Take(pageSize)
       .Select(p => new PersonListItemDto(
         p.PersonId, p.FirstName, p.MiddleName, p.LastName, p.Gender, p.Barangay, p.Municipality, p.Birthdate,
-        p.IsSeniorCitizen == true, p.IsSoloParent == true, p.IsPwd == true, p.Is4P == true))
+        p.IsSeniorCitizen == true, p.IsSoloParent == true, p.IsPwd == true, p.Is4P == true, p.BirthdateEstimated))
       .ToListAsync();
 
     var totalPages = (int)Math.Ceiling((double)total / pageSize);
@@ -611,6 +611,8 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
     person.IsPwd = dto.IsPwd;
     person.IsRr = dto.IsRr;
     person.Is4P = dto.Is4P;
+    var sameDate = person.Birthdate == dto.Birthdate;
+    person.BirthdateEstimated = dto.Birthdate is not null && (dto.BirthdateEstimated ?? (sameDate && person.BirthdateEstimated));
     person.Birthdate = dto.Birthdate;
     person.ContactNo = contactNo;
     person.SkillOccupation = Clean(dto.SkillOccupation);
@@ -663,6 +665,7 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
     IsRr = p.IsRr,
     Is4P = p.Is4P,
     Birthdate = p.Birthdate,
+    BirthdateEstimated = p.BirthdateEstimated,
     ContactNo = p.ContactNo,
     SkillOccupation = p.SkillOccupation,
     EstimatedMonthlyIncome = p.EstimatedMonthlyIncome,
@@ -683,6 +686,7 @@ public partial class PersonService(ApplicationDbContext db, TimeProvider time)
     ["sexId"] = p.SexId,
     ["civilStatusId"] = p.CivilStatusId,
     ["birthdate"] = p.Birthdate,
+    ["birthdateEstimated"] = p.BirthdateEstimated,
     ["contactNo"] = p.ContactNo,
     ["skillOccupation"] = p.SkillOccupation,
     ["estimatedMonthlyIncome"] = p.EstimatedMonthlyIncome,

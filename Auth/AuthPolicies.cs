@@ -85,7 +85,8 @@ public static class AuthPolicies
         .Build())
       .AddPolicy(ClaimsViewer, new AuthorizationPolicyBuilder()
         .Combine(basePolicy)
-        .RequireRole(RoleNames.SocialWorker, RoleNames.SuperAdministrator, RoleNames.Administrator)
+        // approvers need to see what they approve
+        .RequireRole(RoleNames.SocialWorker, RoleNames.Approver, RoleNames.SuperAdministrator, RoleNames.Administrator)
         .Build())
       .AddPolicy(AllowPendingPasswordChange, policy => policy
         .RequireAuthenticatedUser());

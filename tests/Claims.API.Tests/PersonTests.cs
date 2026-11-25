@@ -618,4 +618,51 @@ public class PersonTests
     await using var app = new ClaimsApiFactory();
     Assert.Equal(HttpStatusCode.Unauthorized, (await app.CreateClient().GetAsync("/api/persons?search=cruz")).StatusCode);
   }
+
+  private static object WithBirthdate(string birthdate, bool? estimated) => new
+  {
+    firstName = "Juan", middleName = "Santos", lastName = "Dela Cruz", sexId = 1, barangayId = 100,
+    birthdate, birthdateEstimated = estimated,
+  };
+
+  [Fact]
+  public async Task Estimated_SavedReturnedKeptAndCleared()
+  {
+    var (app, client, _) = await StartAsync();
+    await using (app)
+    {
+      var id = (await Json(await client.PostAsJsonAsync("/api/persons", NewPerson()))).GetProperty("personId").GetInt32();
+
+      var saved = await Json(await client.PutAsJsonAsync($"/api/persons/{id}", WithBirthdate("1956-01-01", true)));
+      Assert.True(saved.GetProperty("birthdateEstimated").GetBoolean());
+      var found = await Json(await client.GetAsync("/api/persons?search=dela"));
+      Assert.True(found.GetProperty("items")[0].GetProperty("birthdateEstimated").GetBoolean());
+
+      // an old page resends the same date without the flag: keep it
+      var resent = await Json(await client.PutAsJsonAsync($"/api/persons/{id}", WithBirthdate("1956-01-01", null)));
+      Assert.True(resent.GetProperty("birthdateEstimated").GetBoolean());
+
+      // a new exact date clears it
+      var exact = await Json(await client.PutAsJsonAsync($"/api/persons/{id}", WithBirthdate("1956-03-14", null)));
+      Assert.False(exact.GetProperty("birthdateEstimated").GetBoolean());
+
+      var history = await Json(await client.GetAsync($"/api/persons/{id}/history"));
+      Assert.Contains(history.EnumerateArray(), h => (h.GetProperty("newValues").GetString() ?? "").Contains("birthdateEstimated"));
+    }
+  }
+
+  [Fact]
+  public async Task Matching_TreatsEstimatedAsUnknown()
+  {
+    var (app, client, _) = await StartAsync();
+    await using (app)
+    {
+      var first = await client.PostAsJsonAsync("/api/persons", WithBirthdate("1956-01-01", true));
+      Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+
+      // a known, different birthdate would not warn; an estimated one must not rule the match out
+      var second = await client.PostAsJsonAsync("/api/persons", WithBirthdate("1980-05-17", null));
+      Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+    }
+  }
 }

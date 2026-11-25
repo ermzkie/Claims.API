@@ -34,7 +34,8 @@ public partial class PersonService
       .Where(p =>
         (lastStarts.Contains(p.LastName!.Substring(0, 1)) && firstStarts.Contains(p.FirstName!.Substring(0, 1)))
         || (firstStarts.Contains(p.LastName!.Substring(0, 1)) && lastStarts.Contains(p.FirstName!.Substring(0, 1))))
-      .Select(p => new { p.PersonId, p.LastName, p.FirstName, p.MiddleName, p.NameSuffixId, p.Birthdate })
+      // an estimated birthdate is a guess, so it counts as unknown
+      .Select(p => new { p.PersonId, p.LastName, p.FirstName, p.MiddleName, p.NameSuffixId, Birthdate = p.BirthdateEstimated ? null : p.Birthdate })
       .ToListAsync();
 
     var found = candidates
@@ -109,7 +110,7 @@ public partial class PersonService
       FirstName = person.FirstName,
       MiddleName = person.MiddleName,
       NameSuffixId = person.NameSuffixId,
-      Birthdate = person.Birthdate,
+      Birthdate = person.BirthdateEstimated ? null : person.Birthdate,
       ExceptPersonId = person.PersonId == 0 ? null : person.PersonId,
     });
     var same = matches.Where(m => m.Level == "same").ToList();

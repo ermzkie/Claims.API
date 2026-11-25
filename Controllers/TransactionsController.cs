@@ -37,6 +37,11 @@ public class TransactionsController(
   private bool CanHandleMoney => IsAdmin || currentUser.IsInRole(RoleNames.SocialWorker);
   private bool CanApprove => IsAdmin || currentUser.IsInRole(RoleNames.Approver);
 
+  private const string NeedsBirthdate = "Set the client's birthdate or approximate age before releasing.";
+
+  private Task<bool> HasBirthdateAsync(int? personId, CancellationToken ct) =>
+    context.People.AnyAsync(p => p.PersonId == personId && p.Birthdate != null, ct);
+
   private DateTime Now() => time.GetUtcNow().UtcDateTime.AddHours(8);
 
   [HttpGet("current-social-worker")]
@@ -148,8 +153,7 @@ public class TransactionsController(
       case null:
       case "":
       case "all":
-        //show all active transactions.
-        query = query.Where(ClaimRules.Counted);
+        // the status filter above already picks active or cancelled
         break;
 
       case "waiting":
@@ -349,7 +353,8 @@ public class TransactionsController(
       Date = date ?? transaction?.Date,
       LaneTypeId = dto.LaneTypeId ?? transaction?.LaneTypeId,
       PatientPersonId = dto.PatientPersonId ?? transaction?.PatientPersonId,
-      RepresentativePersonId = dto.RepresentativePersonId ?? transaction?.RepresentativePersonId,
+      RepresentativePersonId = dto.ClearRepresentative ? null : dto.RepresentativePersonId ?? transaction?.RepresentativePersonId,
+      Representative = dto.ClearRepresentative ? null : transaction?.Representative,
       SocialWorkerAssessment = Text(dto.SocialWorkerAssessment, transaction?.SocialWorkerAssessment),
       Remarks = Text(dto.Remarks, transaction?.Remarks),
       IsReleased = dto.IsReleased ?? transaction?.IsReleased ?? false,
@@ -479,6 +484,7 @@ public class TransactionsController(
     transaction.LaneTypeId = next.LaneTypeId;
     transaction.PatientPersonId = next.PatientPersonId;
     transaction.RepresentativePersonId = next.RepresentativePersonId;
+    transaction.Representative = next.Representative;
     transaction.SocialWorkerAssessment = next.SocialWorkerAssessment;
     transaction.Remarks = next.Remarks;
     transaction.IsReleased = next.IsReleased;
@@ -779,6 +785,9 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
       });
     }
 
+    if (!await HasBirthdateAsync(transaction.PatientPersonId, cancellationToken))
+      return BadRequest(new { message = NeedsBirthdate });
+
     var previousIsReleased = transaction.IsReleased;
     var previousReleasedBy = transaction.ReleasedBy;
     var previousDateReleased = transaction.DateReleased;
@@ -950,6 +959,9 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
       return "Set the amount before releasing the claim.";
     if (next.IsReleased == true && current?.IsReleased != true && next.AssistanceCode is null)
       return "Set the program before releasing the claim.";
+    // every release, old claims too: this is how the missing birthdates get filled in
+    if (next.IsReleased == true && current?.IsReleased != true && !await HasBirthdateAsync(next.PatientPersonId, ct))
+      return NeedsBirthdate;
 
     if (Changed("natureIds") && natureIds.Count > 0)
     {
@@ -967,6 +979,7 @@ public async Task<ActionResult<TransactionResponseDto>> ApproveTransaction(
     ["laneTypeId"] = t.LaneTypeId,
     ["patientPersonId"] = t.PatientPersonId,
     ["representativePersonId"] = t.RepresentativePersonId,
+    ["representative"] = Text(t.Representative, null),
     ["fundSourceId"] = allocation?.FundSourceId,
     ["creditorId"] = allocation?.CreditorId,
     ["modeId"] = allocation?.ModeId,

@@ -61,7 +61,7 @@ public class QueueTests
     var r = new LaneType { LaneTypeCode = "R", LaneTypeDesc = "Regular Lane" };
     var s = new LaneType { LaneTypeCode = "S", LaneTypeDesc = "Senior Citizen/PWD Lane" };
     var v = new LaneType { LaneTypeCode = "V", LaneTypeDesc = "Very Important Persons Lane" };
-    var patient = new Person { FirstName = "MARIA", MiddleName = "CRUZ", LastName = "SANTOS", Status = true };
+    var patient = new Person { FirstName = "MARIA", MiddleName = "CRUZ", LastName = "SANTOS", Status = true, Birthdate = new DateOnly(1958, 3, 1) };
     db.AddRange(r, s, v, patient);
     await db.SaveChangesAsync();
     await db.AddProgramsAsync(("AICS", "AICS"));
@@ -325,6 +325,46 @@ public class QueueTests
     Assert.Contains("Say why the client wasn't served.", await empty.Content.ReadAsStringAsync());
     var tooLong = await o.Worker.PostAsJsonAsync($"/api/queue/{s1.TransactionId}/not-served", new { reason = new string('x', 501) });
     Assert.Equal(HttpStatusCode.BadRequest, tooLong.StatusCode);
+  }
+
+  private static async Task SendForApprovalAsync(HttpClient client, int id)
+  {
+    Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsJsonAsync("/api/transactions/save",
+      new { transactionId = id, amount = 100m, assistanceCode = "AICS" })).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/api/transactions/{id}/submit-for-approval", null)).StatusCode);
+  }
+
+  // the approvers have it now, so the worker can call the next client
+  [Fact]
+  public async Task SentForApproval_FreesTheWorker()
+  {
+    await using var o = await SetupAsync();
+    await FileAsync(o, o.S);
+    await FileAsync(o, o.S);
+    var s1 = await NextAsync(o.Worker);
+    await SendForApprovalAsync(o.Worker, s1!.TransactionId);
+
+    var lane = Lane(await TodayAsync(o.Worker), "S");
+    Assert.DoesNotContain(lane.Serving, x => x.TransactionId == s1.TransactionId);
+    Assert.DoesNotContain(lane.Waiting, x => x.TransactionId == s1.TransactionId);
+    Assert.Equal("S2", (await NextAsync(o.Worker))!.QueueNoCode);
+
+    // approved and not released yet: still off the serving list
+    Assert.Equal(HttpStatusCode.OK, (await o.Admin.PostAsync($"/api/transactions/{s1.TransactionId}/approve", null)).StatusCode);
+    Assert.DoesNotContain(Lane(await TodayAsync(o.Worker), "S").Serving, x => x.TransactionId == s1.TransactionId);
+  }
+
+  [Fact]
+  public async Task QueueActions_ClaimWithTheApprovers_Is409()
+  {
+    await using var o = await SetupAsync();
+    await FileAsync(o, o.S);
+    var s1 = await NextAsync(o.Worker);
+    await SendForApprovalAsync(o.Worker, s1!.TransactionId);
+
+    var response = await o.Worker.PostAsJsonAsync($"/api/queue/{s1.TransactionId}/return", new { });
+    Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    Assert.Contains("sent for approval", await response.Content.ReadAsStringAsync());
   }
 
   [Fact]

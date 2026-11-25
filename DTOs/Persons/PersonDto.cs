@@ -25,6 +25,7 @@ public class PersonDto
   public bool? IsRr { get; set; }
   public bool? Is4P { get; set; }
   public DateOnly? Birthdate { get; set; }
+  public bool BirthdateEstimated { get; set; }
   public string? ContactNo { get; set; }
   public string? SkillOccupation { get; set; }
   public decimal? EstimatedMonthlyIncome { get; set; }
@@ -77,4 +78,5 @@ public record PersonListItemDto(
   bool IsSeniorCitizen,
   bool IsSoloParent,
   bool IsPwd,
-  bool Is4P);
+  bool Is4P,
+  bool BirthdateEstimated = false);

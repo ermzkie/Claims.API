@@ -60,7 +60,7 @@ public class TransactionSaveTests
     worker.Firstname = "Ana";
     worker.Lastname = "Reyes";
     var lane = new LaneType { LaneTypeCode = "R", LaneTypeDesc = "Regular Lane" };
-    var patient = new Person { FirstName = "MARIA", LastName = "SANTOS", Status = true };
+    var patient = new Person { FirstName = "MARIA", LastName = "SANTOS", Status = true, Birthdate = new DateOnly(1958, 3, 1) };
     var creditor = new Creditor { CreditorId = 501, CreditorName = "PROVINCIAL HOSPITAL", Status = true };
     var removed = new Creditor { CreditorId = 502, CreditorName = "OLD PHARMACY", Status = false };
     var fund = new FundSource { FundSourceId = 601, Year = 2026, Status = true };
@@ -577,5 +577,114 @@ public class TransactionSaveTests
     await o.Admin.PostAsJsonAsync($"/api/transactions/{id}/cancel", new { reason = "wrong lane" });
 
     Assert.Equal(HttpStatusCode.Created, (await File(o)).StatusCode);
+  }
+
+  private static async Task<int> PersonAsync(Office o, string first, DateOnly? birthdate = null, bool estimated = false)
+  {
+    await using var db = o.App.CreateDbContext();
+    var p = new Person { FirstName = first, LastName = "TEST", Status = true, Birthdate = birthdate, BirthdateEstimated = estimated };
+    db.People.Add(p);
+    await db.SaveChangesAsync();
+    return p.PersonId;
+  }
+
+  [Fact]
+  public async Task Release_NeedsBirthdate_AnyClaim()
+  {
+    await using var o = await SetupAsync();
+    var noBirthdate = await PersonAsync(o, "NOBDAY");
+    var created = await Save(o.Front, new { date = "2026-11-10T09:00", laneTypeId = o.LaneId, patientPersonId = noBirthdate });
+    var id = (await created.Content.ReadFromJsonAsync<TransactionResponseDto>())!.TransactionId;
+    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
+
+    var refused = await Save(o.Worker, new { transactionId = id, amount = 100m, assistanceCode = "AICS", isReleased = true });
+    Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+    Assert.Contains("Set the client's birthdate or approximate age before releasing.", await refused.Content.ReadAsStringAsync());
+
+    await using (var db = o.App.CreateDbContext())
+    {
+      var p = await db.People.FindAsync(noBirthdate);
+      p!.Birthdate = new DateOnly(1956, 1, 1);
+      p.BirthdateEstimated = true;
+      await db.SaveChangesAsync();
+    }
+    Assert.Equal(HttpStatusCode.NoContent,
+      (await Save(o.Worker, new { transactionId = id, amount = 100m, assistanceCode = "AICS", isReleased = true })).StatusCode);
+
+    // old-system claim, patient without a birthdate
+    var oldPatient = await PersonAsync(o, "OLDCLIENT");
+    int oldId;
+    await using (var db = o.App.CreateDbContext())
+    {
+      var old = new Transaction { PatientPersonId = oldPatient, LaneTypeId = o.LaneId, Date = new DateTime(2025, 3, 1), AssistanceCode = "AICS", Status = false }.WithMoney(amount: 500m);
+      db.Transactions.Add(old);
+      await db.SaveChangesAsync();
+      oldId = old.TransactionId;
+    }
+    await o.Worker2.PostAsync($"/api/transactions/{oldId}/checkout-social-worker", null);
+    Assert.Equal(HttpStatusCode.BadRequest, (await Save(o.Worker2, new { transactionId = oldId, isReleased = true })).StatusCode);
+  }
+
+  [Fact]
+  public async Task ReleaseAfterApproval_NeedsBirthdate()
+  {
+    await using var o = await SetupAsync();
+    var noBirthdate = await PersonAsync(o, "NOBDAY");
+    var created = await Save(o.Front, new { date = "2026-11-10T09:00", laneTypeId = o.LaneId, patientPersonId = noBirthdate });
+    var id = (await created.Content.ReadFromJsonAsync<TransactionResponseDto>())!.TransactionId;
+    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
+    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, amount = 100m, assistanceCode = "AICS" })).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await o.Worker.PostAsync($"/api/transactions/{id}/submit-for-approval", null)).StatusCode);
+    Assert.Equal(HttpStatusCode.OK, (await o.Admin.PostAsync($"/api/transactions/{id}/approve", null)).StatusCode);
+
+    var refused = await o.Worker.PostAsync($"/api/transactions/{id}/release", null);
+    Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+    Assert.Contains("Set the client's birthdate or approximate age before releasing.", await refused.Content.ReadAsStringAsync());
+
+    await using (var db = o.App.CreateDbContext())
+    {
+      var p = await db.People.FindAsync(noBirthdate);
+      p!.Birthdate = new DateOnly(1956, 1, 1);
+      p.BirthdateEstimated = true;
+      await db.SaveChangesAsync();
+    }
+    Assert.Equal(HttpStatusCode.OK, (await o.Worker.PostAsync($"/api/transactions/{id}/release", null)).StatusCode);
+  }
+
+  [Fact]
+  public async Task ClearRepresentative_ClearsLinkAndOldText()
+  {
+    await using var o = await SetupAsync();
+    var rep = await PersonAsync(o, "REPRESENT");
+    var id = await CreateAsync(o);
+    await using (var db = o.App.CreateDbContext())
+    {
+      var t = await db.Transactions.FindAsync(id);
+      t!.RepresentativePersonId = rep;
+      t.Representative = "LOLA";
+      await db.SaveChangesAsync();
+    }
+    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
+
+    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, clearRepresentative = true })).StatusCode);
+
+    await using var check = o.App.CreateDbContext();
+    var saved = await check.Transactions.FindAsync(id);
+    Assert.Null(saved!.RepresentativePersonId);
+    Assert.Null(saved.Representative);
+    var last = (await History(o, id)).Last();
+    Assert.Contains("LOLA", last.OldValues);
+  }
+
+  [Fact]
+  public async Task Representative_CanBeTheClient()
+  {
+    // the intake sheet's "same as the patient" saves it this way
+    await using var o = await SetupAsync();
+    var id = await CreateAsync(o);
+    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
+    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, representativePersonId = o.PatientId })).StatusCode);
+    var claim = await o.Worker.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{id}");
+    Assert.Equal(o.PatientId, claim!.RepresentativePersonId);
   }
 }

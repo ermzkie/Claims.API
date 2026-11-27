@@ -331,6 +331,13 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
   fields or release.
 - Queue: a claim sent for approval or returned is out of the serving list, so the worker can take the next client.
   Approved claims count as done. Return / not served on them is 409.
+- Picking a lane (new claim or lane change): a lane that is turned off is refused (400 `That lane is turned off.`).
+  A lane with `needsEndorsement` needs `endorsedBy` (max 150) and `endorsementReason` (max 300), both saved on the
+  claim and in its history. Claims already in a lane keep saving after the lane changes.
+  Changing or clearing the endorsement runs the same check. Once a social worker has the claim, only admins can
+  change the endorsement (403).
+- `GET /api/lookups/lane-types` lists only lanes that are on: `[{ id, code, name, needsEndorsement }]`. The queue
+  still shows a turned-off lane while it has claims that day.
 - `clearRepresentative: true` removes the representative (the linked person and the old free-text one).
   The client can be their own representative (the intake sheet's "same as the patient").
 - `assistanceCode` (program) is a code from `/api/lookups/assistance-programs`, Social Worker / admins only.
@@ -340,7 +347,7 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 
 ### Things to know about the queue
 
-- Today only (PH date), cancelled claims never show. Lanes are served Senior/PWD (S), then VIP (V), then
+- Today only (PH date), cancelled claims never show. Lanes are served Senior/PWD (S), then endorsed cases (V), then
   Regular (R): a lane waits until the ones before it are empty.
 - Waiting = no social worker, not released. Being served = has one. Done = released. Not served = marked so
   with a reason.
@@ -375,6 +382,16 @@ Body for POST / PUT: `firstName`, `lastName` (required), `middleName`, `nameSuff
 - Only the decision is saved (AuditLog, `DuplicateGroup`). Nothing is merged yet.
 - `review.keepPersonId` is the record the others will be merged into.
 - `personIds` must be the whole current group. A group comes back if someone new joins it.
+
+### Things to know about reference data
+
+- Admins only: `GET /api/reference-data` lists the lists, `GET|POST /api/reference-data/{key}`,
+  `PUT|DELETE /api/reference-data/{key}/{id}`. Body `{ code, name, group, flags }`.
+- A list can carry `flags` (`[{ key, label }]`); its values then have `flags: { key: bool }`. A flag left out keeps its value.
+- `lanes`: flags `active` (on at the front desk) and `needsEndorsement`. Codes are 1 to 3 letters, saved uppercase, unique.
+  S, V and R come back `locked: true`: their code can't change and they can't be deleted (the queue order uses them).
+  Every lane change goes to AuditLog (`LaneType`: Created, Updated with before/after, Deleted), with who and when.
+- Any value used by records can't be deleted (409); rename it instead.
 
 ## Rules
 

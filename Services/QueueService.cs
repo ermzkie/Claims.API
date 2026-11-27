@@ -18,7 +18,7 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
   public const string Recalled = "Recalled";
   private static readonly string[] QueueActions = [CheckedOut, TakenOver, ReturnedToQueue, NotServed];
 
-  // seniors/PWD first, then VIP, then regular
+  // seniors/PWD first, then endorsed cases, then regular
   private static readonly string[] LaneOrder = ["S", "V", "R"];
 
   // office time with no zone, like the dates stored on claims
@@ -97,7 +97,9 @@ public class QueueService(ApplicationDbContext db, TimeProvider time)
     var lanes = await db.LaneTypes.AsNoTracking().ToListAsync(ct);
     var waiting = InServingOrder(rows.Where(r => r.State == State.Waiting)).ToList();
 
+    // a lane that was turned off still shows while it has claims today
     var laneDtos = lanes
+      .Where(l => l.Status || rows.Any(r => r.Claim.LaneTypeId == l.LaneTypeId))
       .OrderBy(LaneRank).ThenBy(l => l.LaneTypeId)
       .Select(l => new QueueLaneDto(
         l.LaneTypeId,

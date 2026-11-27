@@ -58,6 +58,14 @@ public partial class Transaction
     [Unicode(false)]
     public string? Remarks { get; set; }
 
+    [StringLength(150)]
+    [Unicode(false)]
+    public string? EndorsedBy { get; set; }
+
+    [StringLength(300)]
+    [Unicode(false)]
+    public string? EndorsementReason { get; set; }
+
     [Column("ApprovalStatusID")]
     public short ApprovalStatusId { get; set; }
 

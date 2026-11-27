@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Claims.API.Auth;
 using Claims.API.Data;
 using Claims.API.DTOs.ReferenceData;
 using Claims.API.Models;
@@ -15,23 +17,39 @@ public enum ListOutcome
 
 public record ListResult(ListOutcome Outcome, string? Message = null, ListItemDto? Item = null);
 
-// no status column on these tables, so values are renamed or deleted when unused
-public class ReferenceDataService(ApplicationDbContext db)
+// most of these tables have no status column, so values are renamed or deleted when unused
+public class ReferenceDataService(ApplicationDbContext db, ICurrentUser currentUser, TimeProvider time)
 {
+  private static readonly JsonSerializerOptions LogJson = new(JsonSerializerDefaults.Web);
+
   private const int MaxText = 50;
+  public const string LockedLane =
+    "The S, V and R lanes are used by the queue order and can't be renamed to another code or deleted.";
+  // the queue orders by these codes and the front desk suggests S or R
+  private static readonly string[] QueueLaneCodes = ["S", "V", "R"];
 
   private interface ILookup
   {
     ListInfoDto Info { get; }
+    // set for lists whose changes go to the AuditLog
+    string? AuditEntity { get; }
     Task<bool> NameTakenAsync(ApplicationDbContext db, string candidate, int? exceptId);
+    Task<bool> CodeTakenAsync(ApplicationDbContext db, string candidate, int? exceptId);
+    (string? Code, string? Error) CheckCode(string? code);
+    bool UniqueCode { get; }
     Task<List<ListItemDto>> AllAsync(ApplicationDbContext db);
-    Task<ListItemDto> AddAsync(ApplicationDbContext db, string? code, string name, string? group);
-    Task<ListItemDto?> UpdateAsync(ApplicationDbContext db, int id, string? code, string name, string? group);
+    Task<ListItemDto> AddAsync(ApplicationDbContext db, string? code, string name, string? group, IReadOnlyDictionary<string, bool>? flags);
+    Task<ListItemDto?> UpdateAsync(ApplicationDbContext db, int id, string? code, string name, string? group, IReadOnlyDictionary<string, bool>? flags);
     Task<(bool Found, ListItemDto? Item)> FindAsync(ApplicationDbContext db, int id);
     Task DeleteAsync(ApplicationDbContext db, int id);
   }
 
   private sealed record Groups<T>(IReadOnlyList<string> Choices, Func<T, string?> Get, Action<T, string?> Set);
+
+  // Set gets the sent flags (null when none were sent) and whether the row is new
+  private sealed record Flags<T>(
+    IReadOnlyList<ListFlagDto> Defs, Func<T, IReadOnlyDictionary<string, bool>> Get,
+    Action<T, IReadOnlyDictionary<string, bool>?, bool> Set);
 
   private sealed class Lookup<T>(
     string key,
@@ -45,12 +63,24 @@ public class ReferenceDataService(ApplicationDbContext db)
     Func<T, string?> name,
     Action<T, string?, string> write,
     Func<ApplicationDbContext, int, Task<int>> usedBy,
-    Groups<T>? groups = null) : ILookup where T : class, new()
+    Groups<T>? groups = null,
+    Flags<T>? flags = null,
+    Func<T, bool>? locked = null,
+    Func<string?, (string? Code, string? Error)>? codeRule = null,
+    string? auditEntity = null) : ILookup where T : class, new()
   {
-    public ListInfoDto Info { get; } = new(key, title, hasCode, groups?.Choices);
+    public ListInfoDto Info { get; } = new(key, title, hasCode, groups?.Choices, flags?.Defs);
+
+    public string? AuditEntity => auditEntity;
+
+    public bool UniqueCode => codeRule is not null;
+
+    public (string? Code, string? Error) CheckCode(string? value) =>
+      codeRule?.Invoke(value) ?? (value, null);
 
     private async Task<ListItemDto> ToDtoAsync(ApplicationDbContext db, T row) =>
-      new(id(row), hasCode ? code(row) : null, name(row) ?? "", await usedBy(db, id(row)), groups?.Get(row));
+      new(id(row), hasCode ? code(row) : null, name(row) ?? "", await usedBy(db, id(row)), groups?.Get(row),
+        flags?.Get(row), locked?.Invoke(row) ?? false);
 
     public async Task<List<ListItemDto>> AllAsync(ApplicationDbContext db)
     {
@@ -63,7 +93,8 @@ public class ReferenceDataService(ApplicationDbContext db)
       return items;
     }
 
-    public async Task<ListItemDto> AddAsync(ApplicationDbContext db, string? newCode, string newName, string? group)
+    public async Task<ListItemDto> AddAsync(
+      ApplicationDbContext db, string? newCode, string newName, string? group, IReadOnlyDictionary<string, bool>? sent)
     {
       var row = new T();
       if (numberedByHand)
@@ -73,12 +104,14 @@ public class ReferenceDataService(ApplicationDbContext db)
       }
       write(row, newCode, newName);
       groups?.Set(row, group);
+      flags?.Set(row, sent, true);
       set(db).Add(row);
       await db.SaveChangesAsync();
       return await ToDtoAsync(db, row);
     }
 
-    public async Task<ListItemDto?> UpdateAsync(ApplicationDbContext db, int rowId, string? newCode, string newName, string? group)
+    public async Task<ListItemDto?> UpdateAsync(
+      ApplicationDbContext db, int rowId, string? newCode, string newName, string? group, IReadOnlyDictionary<string, bool>? sent)
     {
       var row = (await set(db).ToListAsync()).FirstOrDefault(r => id(r) == rowId);
       if (row is null)
@@ -87,6 +120,7 @@ public class ReferenceDataService(ApplicationDbContext db)
       }
       write(row, newCode, newName);
       groups?.Set(row, group);
+      flags?.Set(row, sent, false);
       await db.SaveChangesAsync();
       return await ToDtoAsync(db, row);
     }
@@ -107,6 +141,10 @@ public class ReferenceDataService(ApplicationDbContext db)
     public async Task<bool> NameTakenAsync(ApplicationDbContext db, string candidate, int? exceptId) =>
       (await set(db).AsNoTracking().ToListAsync())
         .Any(r => id(r) != exceptId && string.Equals(name(r)?.Trim(), candidate, StringComparison.OrdinalIgnoreCase));
+
+    public async Task<bool> CodeTakenAsync(ApplicationDbContext db, string candidate, int? exceptId) =>
+      (await set(db).AsNoTracking().ToListAsync())
+        .Any(r => id(r) != exceptId && string.Equals(code(r)?.Trim(), candidate, StringComparison.OrdinalIgnoreCase));
   }
 
   private static readonly ILookup[] Lookups =
@@ -136,6 +174,29 @@ public class ReferenceDataService(ApplicationDbContext db)
       d => d.ModeOfAssistances, r => r.ModeId, (_, _) => { },
       _ => null, r => r.ModeDesc, (r, _, n) => r.ModeDesc = n,
       (d, v) => d.ServiceFundAllocations.CountAsync(allocation => allocation.ModeId == v)),
+
+    new Lookup<LaneType>("lanes", "Lanes", hasCode: true, numberedByHand: false,
+      d => d.LaneTypes, r => r.LaneTypeId, (_, _) => { },
+      r => r.LaneTypeCode?.Trim(), r => r.LaneTypeDesc, (r, c, n) => { r.LaneTypeCode = c; r.LaneTypeDesc = n; },
+      (d, v) => d.Transactions.CountAsync(t => t.LaneTypeId == v),
+      flags: new Flags<LaneType>(
+        [new ListFlagDto("active", "On at the front desk"), new ListFlagDto("needsEndorsement", "Needs an endorsement")],
+        r => new Dictionary<string, bool> { ["active"] = r.Status, ["needsEndorsement"] = r.NeedsEndorsement },
+        (r, sent, isNew) =>
+        {
+          r.Status = sent?.TryGetValue("active", out var on) == true ? on : isNew || r.Status;
+          r.NeedsEndorsement = sent?.TryGetValue("needsEndorsement", out var needs) == true ? needs : r.NeedsEndorsement;
+        }),
+      locked: r => QueueLaneCodes.Contains(r.LaneTypeCode?.Trim().ToUpperInvariant()),
+      codeRule: c =>
+      {
+        var value = c?.Trim().ToUpperInvariant();
+        return value is { Length: >= 1 and <= 3 } && value.All(char.IsAsciiLetterUpper)
+          ? (value, null)
+          : (null, "Lane code is 1 to 3 letters.");
+      },
+      // turning the endorsement off and on again has to leave a trail
+      auditEntity: "LaneType"),
   ];
 
   private static ILookup? Find(string key) => Lookups.FirstOrDefault(l => l.Info.Key == key);
@@ -152,17 +213,33 @@ public class ReferenceDataService(ApplicationDbContext db)
       return new ListResult(ListOutcome.NotFound, "List not found.");
     }
     var (error, code, name, group) = await ValidateAsync(list, dto, exceptId: null);
-    return error ?? new ListResult(ListOutcome.Ok, Item: await list.AddAsync(db, code, name!, group));
+    if (error is not null)
+    {
+      return error;
+    }
+    var added = await list.AddAsync(db, code, name!, group, dto.Flags);
+    await LogAsync(list, added.Id, "Created", null, added);
+    return new ListResult(ListOutcome.Ok, Item: added);
   }
 
   public async Task<ListResult> UpdateAsync(string key, int id, SaveListItemDto dto)
   {
-    if (Find(key) is not { } list || !(await list.FindAsync(db, id)).Found)
+    if (Find(key) is not { } list || await list.FindAsync(db, id) is not (true, { } current))
     {
       return new ListResult(ListOutcome.NotFound, "Value not found.");
     }
     var (error, code, name, group) = await ValidateAsync(list, dto, exceptId: id);
-    return error ?? new ListResult(ListOutcome.Ok, Item: await list.UpdateAsync(db, id, code, name!, group));
+    if (error is null && current.Locked && !string.Equals(code, current.Code, StringComparison.OrdinalIgnoreCase))
+    {
+      return new ListResult(ListOutcome.Invalid, LockedLane);
+    }
+    if (error is not null)
+    {
+      return error;
+    }
+    var saved = await list.UpdateAsync(db, id, code, name!, group, dto.Flags);
+    await LogAsync(list, id, "Updated", current, saved);
+    return new ListResult(ListOutcome.Ok, Item: saved);
   }
 
   public async Task<ListResult> DeleteAsync(string key, int id)
@@ -171,12 +248,17 @@ public class ReferenceDataService(ApplicationDbContext db)
     {
       return new ListResult(ListOutcome.NotFound, "Value not found.");
     }
+    if (item.Locked)
+    {
+      return new ListResult(ListOutcome.Conflict, LockedLane);
+    }
     if (item.UsedBy > 0)
     {
       var records = item.UsedBy == 1 ? "1 record uses" : $"{item.UsedBy} records use";
       return new ListResult(ListOutcome.Conflict, $"Can't delete \"{item.Name}\": {records} it. You can rename it instead.");
     }
     await list.DeleteAsync(db, id);
+    await LogAsync(list, id, "Deleted", item, null);
     return new ListResult(ListOutcome.Ok);
   }
 
@@ -184,10 +266,18 @@ public class ReferenceDataService(ApplicationDbContext db)
     ILookup list, SaveListItemDto dto, int? exceptId)
   {
     var name = Clean(dto.Name);
-    var code = list.Info.HasCode ? Clean(dto.Code) : null;
+    var (code, codeError) = list.Info.HasCode ? list.CheckCode(Clean(dto.Code)) : (null, null);
     if (name is null)
     {
       return (new ListResult(ListOutcome.Invalid, "Name is required."), null, null, null);
+    }
+    if (codeError is not null)
+    {
+      return (new ListResult(ListOutcome.Invalid, codeError), null, null, null);
+    }
+    if (list.UniqueCode && code is not null && await list.CodeTakenAsync(db, code, exceptId))
+    {
+      return (new ListResult(ListOutcome.Conflict, "That code is already used by another lane."), null, null, null);
     }
     if (name.Length > MaxText || code?.Length > MaxText)
     {
@@ -205,6 +295,34 @@ public class ReferenceDataService(ApplicationDbContext db)
     return await list.NameTakenAsync(db, name, exceptId)
       ? (new ListResult(ListOutcome.Conflict, "That value is already in the list."), null, null, null)
       : (null, code, name, group);
+  }
+
+  private static object? Values(ListItemDto? item) =>
+    item is null ? null : new { item.Code, item.Name, item.Group, item.Flags };
+
+  private async Task LogAsync(ILookup list, int id, string action, ListItemDto? before, ListItemDto? after)
+  {
+    if (list.AuditEntity is null)
+    {
+      return;
+    }
+    var oldValues = before is null ? null : JsonSerializer.Serialize(Values(before), LogJson);
+    var newValues = after is null ? null : JsonSerializer.Serialize(Values(after), LogJson);
+    if (oldValues == newValues)
+    {
+      return;
+    }
+    db.AuditLogs.Add(new AuditLog
+    {
+      Entity = list.AuditEntity,
+      EntityId = id,
+      Action = action,
+      OldValues = oldValues,
+      NewValues = newValues,
+      UserId = currentUser.Id,
+      DateCreated = time.GetUtcNow().UtcDateTime.AddHours(8),
+    });
+    await db.SaveChangesAsync();
   }
 
   private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

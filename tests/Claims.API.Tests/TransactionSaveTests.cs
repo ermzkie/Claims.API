@@ -113,6 +113,146 @@ public class TransactionSaveTests
     Assert.Equal(HttpStatusCode.OK, (await o.Worker.PostAsync($"/api/transactions/{id}/release", null)).StatusCode);
   }
 
+  private static async Task<short> AddLaneAsync(Office o, string code, string name, bool on = true, bool needsEndorsement = false)
+  {
+    await using var db = o.App.CreateDbContext();
+    var lane = new LaneType { LaneTypeCode = code, LaneTypeDesc = name, Status = on, NeedsEndorsement = needsEndorsement };
+    db.LaneTypes.Add(lane);
+    await db.SaveChangesAsync();
+    return lane.LaneTypeId;
+  }
+
+  // filed before the lane rules existed, straight into the table
+  private static async Task<int> SeedClaimAsync(Office o, short laneId)
+  {
+    await using var db = o.App.CreateDbContext();
+    var claim = new Transaction
+    {
+      Date = new DateTime(2026, 11, 10, 8, 0, 0), LaneTypeId = laneId, QueueNo = 1, PatientPersonId = o.PatientId, Status = true,
+    };
+    db.Transactions.Add(claim);
+    await db.SaveChangesAsync();
+    return claim.TransactionId;
+  }
+
+  private static object NewClaim(Office o, short laneId, string? endorsedBy = null, string? reason = null) => new
+  {
+    date = "2026-11-10T09:00",
+    laneTypeId = laneId,
+    patientPersonId = o.PatientId,
+    confirmSameDay = true,
+    endorsedBy,
+    endorsementReason = reason,
+  };
+
+  [Fact]
+  public async Task EndorsedLane_NeedsEndorserAndReason()
+  {
+    await using var o = await SetupAsync();
+    var v = await AddLaneAsync(o, "V", "Endorsed Cases Lane", needsEndorsement: true);
+
+    var none = await Save(o.Front, NewClaim(o, v));
+    Assert.Equal(HttpStatusCode.BadRequest, none.StatusCode);
+    Assert.Contains("Endorsed Cases Lane needs who endorsed the client and why. Add them from the Front desk.",
+      await none.Content.ReadAsStringAsync());
+    Assert.Equal(HttpStatusCode.BadRequest,
+      (await Save(o.Front, NewClaim(o, v, "  ", "Surgery tomorrow"))).StatusCode);
+
+    var ok = await Save(o.Front, NewClaim(o, v, "Office of the Governor", "Surgery tomorrow"));
+    Assert.Equal(HttpStatusCode.Created, ok.StatusCode);
+    var id = (await ok.Content.ReadFromJsonAsync<TransactionResponseDto>())!.TransactionId;
+    var claim = await o.Admin.GetFromJsonAsync<TransactionResponseDto>($"/api/transactions/{id}");
+    Assert.Equal("Office of the Governor", claim!.EndorsedBy);
+    Assert.Equal("Surgery tomorrow", claim.EndorsementReason);
+  }
+
+  [Fact]
+  public async Task EndorsedLane_OldClaimsStillSave()
+  {
+    await using var o = await SetupAsync();
+    var v = await AddLaneAsync(o, "V", "Endorsed Cases Lane", needsEndorsement: true);
+    var id = await SeedClaimAsync(o, v);
+    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Admin, new { transactionId = id, remarks = "follow-up" })).StatusCode);
+  }
+
+  [Fact]
+  public async Task Endorsement_IsInTheHistory()
+  {
+    await using var o = await SetupAsync();
+    var v = await AddLaneAsync(o, "V", "Endorsed Cases Lane", needsEndorsement: true);
+    var r = await Save(o.Front, NewClaim(o, v, "Board Member Cruz", "Burial on Friday"));
+    var id = (await r.Content.ReadFromJsonAsync<TransactionResponseDto>())!.TransactionId;
+    var created = (await History(o, id)).Single(h => h.Action == "Created");
+    Assert.Contains("Board Member Cruz", created.NewValues);
+    Assert.Contains("Burial on Friday", created.NewValues);
+  }
+
+  [Fact]
+  public async Task Endorsement_CantBeClearedOnAnEndorsedLane()
+  {
+    await using var o = await SetupAsync();
+    var v = await AddLaneAsync(o, "V", "Endorsed Cases Lane", needsEndorsement: true);
+    var r = await Save(o.Front, NewClaim(o, v, "Office of the Governor", "Surgery tomorrow"));
+    var id = (await r.Content.ReadFromJsonAsync<TransactionResponseDto>())!.TransactionId;
+
+    var cleared = await Save(o.Front, new { transactionId = id, endorsedBy = "" });
+    Assert.Equal(HttpStatusCode.BadRequest, cleared.StatusCode);
+    // fixing the wording is still fine
+    Assert.Equal(HttpStatusCode.NoContent,
+      (await Save(o.Front, new { transactionId = id, endorsementReason = "Surgery tomorrow morning" })).StatusCode);
+  }
+
+  [Fact]
+  public async Task Endorsement_LockedOnceASocialWorkerHasTheClaim()
+  {
+    await using var o = await SetupAsync();
+    var v = await AddLaneAsync(o, "V", "Endorsed Cases Lane", needsEndorsement: true);
+    var r = await Save(o.Front, NewClaim(o, v, "Office of the Governor", "Surgery tomorrow"));
+    var id = (await r.Content.ReadFromJsonAsync<TransactionResponseDto>())!.TransactionId;
+    await o.Worker.PostAsync($"/api/transactions/{id}/checkout-social-worker", null);
+
+    Assert.Equal(HttpStatusCode.Forbidden,
+      (await Save(o.Worker, new { transactionId = id, endorsedBy = "Someone else" })).StatusCode);
+    Assert.Equal(HttpStatusCode.Forbidden,
+      (await Save(o.Worker2, new { transactionId = id, endorsementReason = "Changed" })).StatusCode);
+    // the worker can still do the rest of the claim
+    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Worker, new { transactionId = id, remarks = "seen" })).StatusCode);
+    // an admin can correct it
+    Assert.Equal(HttpStatusCode.NoContent,
+      (await Save(o.Admin, new { transactionId = id, endorsedBy = "Office of the Vice Governor" })).StatusCode);
+  }
+
+  [Fact]
+  public async Task TurnedOffLane_RefusesNewClaims_ButOldOnesSave()
+  {
+    await using var o = await SetupAsync();
+    var x = await AddLaneAsync(o, "X", "Extra Lane", on: false);
+
+    var fresh = await Save(o.Front, NewClaim(o, x));
+    Assert.Equal(HttpStatusCode.BadRequest, fresh.StatusCode);
+    Assert.Contains("That lane is turned off.", await fresh.Content.ReadAsStringAsync());
+
+    var old = await SeedClaimAsync(o, x);
+    Assert.Equal(HttpStatusCode.NoContent, (await Save(o.Admin, new { transactionId = old, remarks = "still here" })).StatusCode);
+
+    var other = await CreateAsync(o);
+    var moved = await Save(o.Admin, new { transactionId = other, laneTypeId = x });
+    Assert.Equal(HttpStatusCode.BadRequest, moved.StatusCode);
+  }
+
+  [Fact]
+  public async Task LaneLookup_OnlyOnLanes_WithNeedsEndorsement()
+  {
+    await using var o = await SetupAsync();
+    await AddLaneAsync(o, "V", "Endorsed Cases Lane", needsEndorsement: true);
+    await AddLaneAsync(o, "X", "Extra Lane", on: false);
+    using var doc = System.Text.Json.JsonDocument.Parse(await o.Front.GetStringAsync("/api/lookups/lane-types"));
+    var lanes = doc.RootElement.EnumerateArray().ToList();
+    Assert.DoesNotContain(lanes, l => l.GetProperty("code").GetString() == "X");
+    Assert.True(lanes.Single(l => l.GetProperty("code").GetString() == "V").GetProperty("needsEndorsement").GetBoolean());
+    Assert.False(lanes.Single(l => l.GetProperty("code").GetString() == "R").GetProperty("needsEndorsement").GetBoolean());
+  }
+
   private static async Task<List<TransactionHistoryDto>> History(Office o, int id) =>
     (await o.Admin.GetFromJsonAsync<List<TransactionHistoryDto>>($"/api/transactions/{id}/history"))!;
 

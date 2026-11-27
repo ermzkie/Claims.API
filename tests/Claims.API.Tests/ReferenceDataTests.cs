@@ -52,7 +52,7 @@ public class ReferenceDataTests
   }
 
   [Fact]
-  public async Task Index_NamesTheFiveLists()
+  public async Task Index_NamesTheSixLists()
   {
     var (app, admin) = await StartAsync();
     await using (app)
@@ -61,8 +61,157 @@ public class ReferenceDataTests
       var keys = doc.RootElement.EnumerateArray().Select(e => e.GetProperty("key").GetString()).ToList();
 
       Assert.Equal(
-        ["name-suffixes", "civil-statuses", "relationships", "sources-of-assistance", "modes-of-assistance"],
+        ["name-suffixes", "civil-statuses", "relationships", "sources-of-assistance", "modes-of-assistance", "lanes"],
         keys);
+      var lanes = doc.RootElement.EnumerateArray().Single(e => e.GetProperty("key").GetString() == "lanes");
+      Assert.True(lanes.GetProperty("hasCode").GetBoolean());
+      Assert.Equal(["active", "needsEndorsement"],
+        lanes.GetProperty("flags").EnumerateArray().Select(f => f.GetProperty("key").GetString()).ToList());
+    }
+  }
+
+  private const string LockedLane = "The S, V and R lanes are used by the queue order and can't be renamed to another code or deleted.";
+
+  private static async Task<Dictionary<string, short>> SeedLanesAsync(ClaimsApiFactory app)
+  {
+    await using var db = app.CreateDbContext();
+    var lanes = new[]
+    {
+      new LaneType { LaneTypeCode = "S", LaneTypeDesc = "Senior Citizen/PWD Lane", Status = true },
+      new LaneType { LaneTypeCode = "V", LaneTypeDesc = "Endorsed Cases Lane", Status = true, NeedsEndorsement = true },
+      new LaneType { LaneTypeCode = "R", LaneTypeDesc = "Regular Lane", Status = true },
+      new LaneType { LaneTypeCode = "X", LaneTypeDesc = "Extra Lane", Status = true },
+    };
+    db.LaneTypes.AddRange(lanes);
+    await db.SaveChangesAsync();
+    return lanes.ToDictionary(l => l.LaneTypeCode!, l => l.LaneTypeId);
+  }
+
+  private static async Task<JsonElement> LaneAsync(HttpClient admin, string code)
+  {
+    var doc = JsonDocument.Parse(await admin.GetStringAsync("/api/reference-data/lanes"));
+    return doc.RootElement.EnumerateArray().Single(e => e.GetProperty("code").GetString() == code);
+  }
+
+  [Fact]
+  public async Task Lanes_ListShowsFlagsAndLocks()
+  {
+    var (app, admin) = await StartAsync();
+    await using (app)
+    {
+      await SeedLanesAsync(app);
+      var v = await LaneAsync(admin, "V");
+      Assert.True(v.GetProperty("flags").GetProperty("needsEndorsement").GetBoolean());
+      Assert.True(v.GetProperty("flags").GetProperty("active").GetBoolean());
+      foreach (var code in new[] { "S", "V", "R" })
+        Assert.True((await LaneAsync(admin, code)).GetProperty("locked").GetBoolean(), code);
+      Assert.False((await LaneAsync(admin, "X")).GetProperty("locked").GetBoolean());
+    }
+  }
+
+  [Fact]
+  public async Task Lanes_AddNewLane()
+  {
+    var (app, admin) = await StartAsync();
+    await using (app)
+    {
+      await SeedLanesAsync(app);
+      var r = await admin.PostAsJsonAsync("/api/reference-data/lanes",
+        new { code = "ew", name = "Emergency", flags = new { active = true, needsEndorsement = true } });
+      Assert.Equal(HttpStatusCode.Created, r.StatusCode);
+      var ew = await LaneAsync(admin, "EW");
+      Assert.Equal("Emergency", ew.GetProperty("name").GetString());
+      Assert.True(ew.GetProperty("flags").GetProperty("active").GetBoolean());
+      Assert.True(ew.GetProperty("flags").GetProperty("needsEndorsement").GetBoolean());
+    }
+  }
+
+  [Theory]
+  [InlineData("", "Lane code is 1 to 3 letters.")]
+  [InlineData("ABCD", "Lane code is 1 to 3 letters.")]
+  [InlineData("E1", "Lane code is 1 to 3 letters.")]
+  [InlineData("r", "That code is already used by another lane.")]
+  public async Task Lanes_CodeRules(string code, string message)
+  {
+    var (app, admin) = await StartAsync();
+    await using (app)
+    {
+      await SeedLanesAsync(app);
+      var r = await admin.PostAsJsonAsync("/api/reference-data/lanes", new { code, name = "Another Lane" });
+      Assert.Equal(code == "r" ? HttpStatusCode.Conflict : HttpStatusCode.BadRequest, r.StatusCode);
+      Assert.Equal(message, await Message(r));
+    }
+  }
+
+  [Fact]
+  public async Task Lanes_LockedCodeCantChange_ButNameAndFlagsCan()
+  {
+    var (app, admin) = await StartAsync();
+    await using (app)
+    {
+      var ids = await SeedLanesAsync(app);
+      var bad = await admin.PutAsJsonAsync($"/api/reference-data/lanes/{ids["V"]}", new { code = "VP", name = "Endorsed" });
+      Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+      Assert.Equal(LockedLane, await Message(bad));
+
+      var ok = await admin.PutAsJsonAsync($"/api/reference-data/lanes/{ids["V"]}",
+        new { code = "V", name = "Endorsed / special cases", flags = new { active = false, needsEndorsement = true } });
+      Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+      var v = await LaneAsync(admin, "V");
+      Assert.Equal("Endorsed / special cases", v.GetProperty("name").GetString());
+      Assert.False(v.GetProperty("flags").GetProperty("active").GetBoolean());
+    }
+  }
+
+  [Fact]
+  public async Task Lanes_ChangesGoToTheHistory()
+  {
+    var (app, admin) = await StartAsync();
+    await using (app)
+    {
+      var ids = await SeedLanesAsync(app);
+      // endorsement switched off, then back on
+      await admin.PutAsJsonAsync($"/api/reference-data/lanes/{ids["V"]}",
+        new { code = "V", name = "Endorsed Cases Lane", flags = new { needsEndorsement = false } });
+      await admin.PutAsJsonAsync($"/api/reference-data/lanes/{ids["V"]}",
+        new { code = "V", name = "Endorsed Cases Lane", flags = new { needsEndorsement = true } });
+      // saving with nothing changed adds nothing
+      await admin.PutAsJsonAsync($"/api/reference-data/lanes/{ids["V"]}",
+        new { code = "V", name = "Endorsed Cases Lane" });
+      var added = await admin.PostAsJsonAsync("/api/reference-data/lanes", new { code = "EW", name = "Emergency" });
+      var ewId = (await added.Content.ReadFromJsonAsync<Item>())!.Id;
+      await admin.DeleteAsync($"/api/reference-data/lanes/{ewId}");
+      // other lists don't log
+      await admin.PostAsJsonAsync("/api/reference-data/civil-statuses", new { code = "W", name = "Widowed" });
+
+      await using var db = app.CreateDbContext();
+      var adminId = await db.Users.Where(u => u.Username == "admin").Select(u => u.UserId).SingleAsync();
+      var logs = await db.AuditLogs.OrderBy(l => l.AuditLogId).ToListAsync();
+      Assert.All(logs, l => Assert.Equal("LaneType", l.Entity));
+      Assert.Equal(["Updated", "Updated", "Created", "Deleted"], logs.Select(l => l.Action));
+      Assert.Equal(ids["V"], logs[0].EntityId);
+      Assert.Contains("\"needsEndorsement\":true", logs[0].OldValues);
+      Assert.Contains("\"needsEndorsement\":false", logs[0].NewValues);
+      Assert.Contains("\"needsEndorsement\":true", logs[1].NewValues);
+      Assert.Contains("Emergency", logs[2].NewValues);
+      Assert.Null(logs[2].OldValues);
+      Assert.Equal(ewId, logs[3].EntityId);
+      Assert.Contains("Emergency", logs[3].OldValues);
+      Assert.All(logs, l => Assert.Equal(adminId, l.UserId));
+    }
+  }
+
+  [Fact]
+  public async Task Lanes_LockedCantBeDeleted()
+  {
+    var (app, admin) = await StartAsync();
+    await using (app)
+    {
+      var ids = await SeedLanesAsync(app);
+      var s = await admin.DeleteAsync($"/api/reference-data/lanes/{ids["S"]}");
+      Assert.Equal(HttpStatusCode.Conflict, s.StatusCode);
+      Assert.Equal(LockedLane, await Message(s));
+      Assert.Equal(HttpStatusCode.NoContent, (await admin.DeleteAsync($"/api/reference-data/lanes/{ids["X"]}")).StatusCode);
     }
   }
 
